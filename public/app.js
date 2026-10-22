@@ -28,6 +28,8 @@
     scanProgress: null,
     pendingScanReload: false,
     wasScanning: false,
+    liveVersion: 0,
+    refreshingLive: false,
     pollTimer: null,
     searchResults: [],
     searchIndex: -1,
@@ -395,13 +397,78 @@
       '<span><i class="dot dot-free"></i>可用 ' + fmtBytes(d.free) + '</span>';
   }
 
+  function renderCapacityLive(p) {
+    const d = state.overview && state.overview.drive;
+    if (!d || !d.total || !p) return;
+    const scanned = Math.max(0, Number(p.bytes || 0));
+    const system = Math.max(0, d.used - scanned);
+    const pct = (v) => (v / d.total) * 100;
+    $('#segScan').style.width = pct(Math.min(scanned, d.used)) + '%';
+    $('#segSystem').style.width = pct(Math.min(system, d.used)) + '%';
+    $('#segFree').style.width = pct(d.free) + '%';
+    $('#capStats').innerHTML =
+      '<b>' + fmtBytes(d.used) + '</b> 已用 · <b>' + fmtBytes(d.free) + '</b> 可用 / ' + fmtBytes(d.total);
+    $('#capLegend').innerHTML =
+      '<span><i class="dot dot-scan"></i>已分析 ' + fmtBytes(scanned) + '</span>' +
+      '<span><i class="dot dot-system"></i>系统 / 未扫描 ' + fmtBytes(system) + '</span>' +
+      '<span><i class="dot dot-free"></i>可用 ' + fmtBytes(d.free) + '</span>';
+  }
+
+  async function refreshLiveView() {
+    if (state.refreshingLive) return;
+    state.refreshingLive = true;
+    try {
+      const target = state.path || 'C:\\';
+      const fresh = await api('/api/list?path=' + encodeURIComponent(target) + '&live=1');
+      const hasLiveContent =
+        (fresh.dirs || []).some((x) => Number(x.size) > 0) ||
+        (fresh.systemItems || []).some((x) => Number(x.size) > 0);
+      if (!state.data && !hasLiveContent) return;
+      const old = state.data;
+      const samePath = old && keyFor(old.path) === keyFor(fresh.path);
+      const merged = Object.assign({}, fresh);
+      if (samePath) {
+        merged.files = old.files || [];
+        merged.fileBucket = old.fileBucket || fresh.fileBucket;
+      }
+      const selectedKey = state.selected ? state.selected.key : null;
+      const listEl = $('#itemList');
+      const scrollTop = listEl ? listEl.scrollTop : 0;
+      state.data = merged;
+      state.path = merged.path;
+      state.currentItems = buildItems(merged);
+      state.itemsByKey = new Map(state.currentItems.map((it) => [it.key, it]));
+      if (selectedKey && state.itemsByKey.has(selectedKey)) state.selected = state.itemsByKey.get(selectedKey);
+      else if (selectedKey) state.selected = null;
+      for (const key of Array.from(state.checked.keys())) {
+        if (!state.itemsByKey.has(key)) state.checked.delete(key);
+        else state.checked.set(key, state.itemsByKey.get(key));
+      }
+      renderInspector();
+      renderList();
+      updateListSelection();
+      renderBreadcrumbs();
+      renderCanvasTitle();
+      updateTray();
+      draw();
+      if (listEl) listEl.scrollTop = scrollTop;
+      hideCanvasEmpty();
+    } catch (_) {
+      // 扫描期间的局部刷新失败不打断界面，等待下一次刷新或扫描完成。
+    } finally {
+      state.refreshingLive = false;
+    }
+  }
+
   function renderScanUI(progress) {
     const p = progress || state.scanProgress;
     const scanning = !!(p && p.phase === 'scanning' && p.ageMs < 16000);
+    const changed = state.scanning !== scanning;
     state.scanning = scanning;
     state.scanProgress = p;
     const chip = $('#scanChip');
     const rescan = $('#rescanBtn');
+    const suggest = $('#suggestBtn');
     if (scanning) {
       chip.classList.remove('hidden');
       const parts = ['扫描中'];
@@ -410,12 +477,14 @@
       if (p.queueLength) parts.push('待处理 ' + fmtCount(p.queueLength));
       $('#scanChipText').textContent = parts.join(' · ');
       rescan.disabled = true;
+      if (suggest) suggest.disabled = true;
       if (!state.data) {
         updateCanvasLoadingForScan(p);
       }
     } else {
       chip.classList.add('hidden');
       rescan.disabled = false;
+      if (suggest) suggest.disabled = false;
       if (!state.data) {
         if (state.overview && state.overview.scan) {
           showCanvasLoading(false);
@@ -423,6 +492,11 @@
           showCanvasEmpty('no-scan');
         }
       }
+    }
+    if (changed && state.data) {
+      renderInspector();
+      renderList();
+      updateTray();
     }
     renderStatus();
   }
@@ -1023,7 +1097,7 @@
   }
 
   function toggleChecked(item, forceOn) {
-    if (!item || !item.deletable || !item.path) return;
+    if (!item || !item.deletable || !item.path || state.scanning) return;
     const key = item.key;
     const on = forceOn === true ? true : !state.checked.has(key);
     if (on) state.checked.set(key, item);
@@ -1043,6 +1117,11 @@
     $('#trayCount').textContent = n;
     $('#traySize').textContent = fmtBytes(total);
     $('#selectionTray').classList.toggle('hidden', n === 0);
+    const deleteBtn = $('#trayDeleteBtn');
+    if (deleteBtn) {
+      deleteBtn.disabled = state.scanning || n === 0;
+      deleteBtn.title = state.scanning ? '扫描完成后可删除' : '';
+    }
   }
 
   function renderInspector() {
@@ -1079,9 +1158,11 @@
         '</div>' +
         '<div class="sel-actions">' +
         '<button class="btn btn-accent" data-act="open-current"><svg><use href="#i-external"/></svg> 打开位置</button>' +
-        '<button class="btn btn-ghost" data-act="suggest"><svg><use href="#i-sparkles"/></svg> 清理建议</button>' +
+        '<button class="btn btn-ghost" data-act="suggest"' + (state.scanning ? ' disabled title="扫描完成后可使用"' : '') + '><svg><use href="#i-sparkles"/></svg> 清理建议</button>' +
         '</div>' +
-        '<div class="summary-note">点击方块或下方列表选中项目；勾选多项可批量删除。右侧数字均为文件逻辑大小。</div>';
+        '<div class="summary-note">' +
+        (state.scanning ? '扫描进行中，方块图会实时更新；完成后可勾选并删除项目。' : '点击方块或下方列表选中项目；勾选多项可批量删除。右侧数字均为文件逻辑大小。') +
+        '</div>';
       head.querySelector('[data-act="open-current"]').addEventListener('click', () => openPath(d.path));
       head.querySelector('[data-act="suggest"]').addEventListener('click', openSuggestions);
       return;
@@ -1090,27 +1171,30 @@
     const style = item.kind === 'file' ? fileStyle(item.ext) : null;
     const icon = item.kind === 'dir' ? 'i-folder' : item.kind === 'system' ? 'i-lock' : item.kind === 'bucket' ? 'i-layers' : style.icon;
     const pct = fmtPct(item.size, d.size);
-    const isBlocked = !!item.protected || !item.deletable;
+    const isBlocked = !!item.protected || !item.deletable || state.scanning;
+    const blockTitle = state.scanning ? '扫描完成后可删除' : '';
     let actions = '';
     if (item.kind === 'dir') {
       actions +=
         '<button class="btn btn-accent" data-act="enter"' + (item.path ? '' : ' disabled') + '><svg><use href="#i-chevron"/></svg> 进入目录</button>' +
         '<button class="btn btn-ghost" data-act="open"><svg><use href="#i-external"/></svg> 打开位置</button>' +
-        '<button class="btn btn-danger" data-act="recycle"' + (isBlocked || !item.path ? ' disabled' : '') + '><svg><use href="#i-recycle"/></svg> 移到回收站</button>' +
-        '<button class="btn btn-danger-ghost" data-act="permanent"' + (isBlocked || !item.path ? ' disabled' : '') + '><svg><use href="#i-trash"/></svg> 永久删除</button>';
+        '<button class="btn btn-danger" data-act="recycle"' + (isBlocked || !item.path ? ' disabled' : '') + (blockTitle ? ' title="' + escapeHtml(blockTitle) + '"' : '') + '><svg><use href="#i-recycle"/></svg> 移到回收站</button>' +
+        '<button class="btn btn-danger-ghost" data-act="permanent"' + (isBlocked || !item.path ? ' disabled' : '') + (blockTitle ? ' title="' + escapeHtml(blockTitle) + '"' : '') + '><svg><use href="#i-trash"/></svg> 永久删除</button>';
     } else if (item.kind === 'file') {
       actions +=
         '<button class="btn btn-accent" data-act="open"><svg><use href="#i-external"/></svg> 打开位置</button>' +
         '<button class="btn btn-ghost" data-act="copy"><svg><use href="#i-file"/></svg> 复制路径</button>' +
-        '<button class="btn btn-danger" data-act="recycle"' + (isBlocked ? ' disabled' : '') + '><svg><use href="#i-recycle"/></svg> 移到回收站</button>' +
-        '<button class="btn btn-danger-ghost" data-act="permanent"' + (isBlocked ? ' disabled' : '') + '><svg><use href="#i-trash"/></svg> 永久删除</button>';
+        '<button class="btn btn-danger" data-act="recycle"' + (isBlocked ? ' disabled' : '') + (blockTitle ? ' title="' + escapeHtml(blockTitle) + '"' : '') + '><svg><use href="#i-recycle"/></svg> 移到回收站</button>' +
+        '<button class="btn btn-danger-ghost" data-act="permanent"' + (isBlocked ? ' disabled' : '') + (blockTitle ? ' title="' + escapeHtml(blockTitle) + '"' : '') + '><svg><use href="#i-trash"/></svg> 永久删除</button>';
     } else {
       actions =
         '<button class="btn btn-ghost span2" data-act="clear"><svg><use href="#i-back"/></svg> 返回目录概览</button>';
     }
 
     let note = '';
-    if (item.kind === 'system') {
+    if (state.scanning && !item.protected) {
+      note = '<div class="sel-note"><svg><use href="#i-clock"/></svg><span>扫描进行中，当前大小会持续变化。请等待扫描完成后再删除。</span></div>';
+    } else if (item.kind === 'system') {
       note = '<div class="sel-note"><svg><use href="#i-lock"/></svg><span>' + escapeHtml(item.note || '系统保留区域，工具不会直接删除。') + '</span></div>';
     } else if (item.kind === 'bucket') {
       note = '<div class="sel-note"><svg><use href="#i-info"/></svg><span>' + escapeHtml(item.note || '聚合项目，无法整体删除。') + '</span></div>';
@@ -1193,10 +1277,11 @@
       const row = document.createElement('div');
       row.className = 'item-row' + (item.isDir ? ' has-enter' : '') + (item.kind === 'bucket' || item.kind === 'system' ? ' bucket' : '');
       row.setAttribute('data-key', item.key);
-      const canCheck = item.deletable && item.path;
+      const canCheck = item.deletable && item.path && !state.scanning;
+      const checkTitle = state.scanning ? '扫描完成后可删除' : '不可直接勾选删除';
       row.innerHTML =
         '<input class="chk" type="checkbox" ' +
-        (canCheck ? '' : 'disabled title="不可直接勾选删除"') +
+        (canCheck ? '' : 'disabled title="' + escapeHtml(checkTitle) + '"') +
         ' aria-label="选择 ' +
         escapeHtml(item.name) +
         '">' +
@@ -1272,6 +1357,10 @@
 
   // ---------- 删除 ----------
   function openDeleteModal(mode, items) {
+    if (state.scanning) {
+      toast('扫描正在进行', '请等待扫描完成后再删除，以免统计结果发生变化。', 'info');
+      return;
+    }
     const valid = items.filter((i) => i && (i.paths && i.paths.length ? true : i.path) && !i.protected);
     if (!valid.length) {
       toast('没有可删除的项目', '受保护的系统项目不会被处理。', 'error');
@@ -1421,6 +1510,10 @@
 
   // ---------- 清理建议 ----------
   async function openSuggestions() {
+    if (state.scanning) {
+      toast('扫描正在进行', '请等待扫描完成后再生成清理建议。', 'info');
+      return;
+    }
     $('#scrim').classList.remove('hidden');
     $('#suggestDrawer').classList.remove('hidden');
     $('#suggestBody').innerHTML = '<div class="drawer-loading"><div class="loader"></div><span>正在统计可清理项目…</span></div>';
@@ -1700,9 +1793,15 @@
       state.wasScanning = scanning;
       if (scanning) {
         state.pendingScanReload = true;
+        renderCapacityLive(p);
+        if (res.liveMtime && res.liveMtime !== state.liveVersion) {
+          state.liveVersion = res.liveMtime;
+          await refreshLiveView();
+        }
         schedulePoll(1400);
         return;
       }
+      state.liveVersion = 0;
       if (prev || state.pendingScanReload) {
         state.pendingScanReload = false;
         await finishScan();
@@ -1738,7 +1837,7 @@
       }
       state.pendingScanReload = true;
       state.wasScanning = true;
-      toast('已开始重新扫描', '旧数据仍可浏览，完成后会自动刷新。', 'info');
+      toast('已开始重新扫描', '方块图会随扫描进度实时更新；完成后可删除。', 'info');
       schedulePoll(900);
     } catch (e) {
       toast('无法开始扫描', e.message, 'error');
@@ -1894,6 +1993,10 @@
   });
 
   $('#selectAllBtn').addEventListener('click', () => {
+    if (state.scanning) {
+      toast('扫描正在进行', '请等待扫描完成后再选择删除项目。', 'info');
+      return;
+    }
     for (const i of state.currentItems) {
       if (i.deletable && i.path && i.kind !== 'bucket' && i.kind !== 'system') state.checked.set(i.key, i);
     }
@@ -1986,6 +2089,13 @@
     if (e.key === 'Enter' && state.selected && state.selected.kind === 'dir' && state.selected.path) {
       if (!$('#deleteModal').classList.contains('hidden') || !$('#suggestDrawer').classList.contains('hidden')) return;
       loadPath(state.selected.path, { push: true });
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      state.liveVersion = 0;
+      schedulePoll(200);
     }
   });
 

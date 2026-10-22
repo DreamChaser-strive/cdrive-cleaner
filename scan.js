@@ -17,9 +17,13 @@ const OUT_DIR = process.env.CDRIVE_DATA_DIR
 const OUT_FILE = path.join(OUT_DIR, 'scan.json');
 const PROGRESS_FILE = path.join(OUT_DIR, 'progress.json');
 const TMP_FILE = path.join(OUT_DIR, 'scan.json.tmp');
+const LIVE_FILE = path.join(OUT_DIR, 'scan.live.json');
+const LIVE_TMP_FILE = path.join(OUT_DIR, 'scan.live.json.tmp');
 const WORKERS = 32;
 const FILE_CHUNK = 64;
 const STORE_MIN_SIZE = 256 * 1024; // 仅缓存 >= 256KB 的目录
+const LIVE_MIN_SIZE = 4 * 1024 * 1024; // 扫描过程中只展示 >= 4MB 的目录
+const LIVE_FLUSH_INTERVAL = 1500;
 const MAX_CHILDREN = 300;
 const SKIP_NAMES = new Set(['system volume information']);
 const SKIP_ROOT_PATHS = new Set(['c:\\documents and settings']);
@@ -89,6 +93,54 @@ function writeProgress() {
 const progressTimer = setInterval(writeProgress, 400);
 writeProgress();
 
+function addLiveSize(rec, delta) {
+  if (!delta) return;
+  let cur = rec;
+  for (let guard = 0; cur && guard < 200; guard++) {
+    cur.size += delta;
+    cur = cur.parent ? records.get(cur.parent) : null;
+  }
+}
+
+let liveWriting = false;
+function flushLive() {
+  if (liveWriting) return;
+  liveWriting = true;
+  const dirs = {};
+  let kept = 0;
+  for (const rec of records.values()) {
+    if (rec.key !== ROOT.toLowerCase() && (rec.depth > 10 || rec.size < LIVE_MIN_SIZE)) continue;
+    dirs[rec.key] = {
+      p: rec.path,
+      s: rec.size,
+      d: rec.direct,
+      dc: rec.dirs,
+      parent: rec.parent || null,
+    };
+    kept++;
+  }
+  const payload = JSON.stringify({
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    elapsedMs: Date.now() - startedAtMs,
+    stats: { dirs: records.size, files: state.scannedFiles, bytes: state.bytes },
+    dirs,
+  });
+  fsp
+    .writeFile(LIVE_TMP_FILE, payload, 'utf8')
+    .then(() => fsp.rename(LIVE_TMP_FILE, LIVE_FILE))
+    .catch(() => {})
+    .finally(() => {
+      liveWriting = false;
+    });
+}
+try {
+  fs.rmSync(LIVE_FILE, { force: true });
+  fs.rmSync(LIVE_TMP_FILE, { force: true });
+} catch (_) {}
+const liveTimer = setInterval(flushLive, LIVE_FLUSH_INTERVAL);
+setTimeout(flushLive, 800);
+
 async function statFiles(dirRec, fileEntries) {
   for (let i = 0; i < fileEntries.length; i += FILE_CHUNK) {
     const chunk = fileEntries.slice(i, i + FILE_CHUNK);
@@ -143,7 +195,9 @@ async function scanOneDir(dirPath) {
       fileEntries.push(entry);
     }
   }
+  const directBefore = dirRec.direct;
   await statFiles(dirRec, fileEntries);
+  addLiveSize(dirRec, dirRec.direct - directBefore);
   state.scannedDirs += 1;
   state.currentPath = dirPath;
 }
@@ -243,6 +297,11 @@ async function main() {
   state.finishedAt = new Date().toISOString();
   writeProgress();
   clearInterval(progressTimer);
+  clearInterval(liveTimer);
+  try {
+    fs.rmSync(LIVE_FILE, { force: true });
+    fs.rmSync(LIVE_TMP_FILE, { force: true });
+  } catch (_) {}
 
   console.log(
     `Done. ${records.size} dirs, ${state.scannedFiles} files, ${(rootRec.size / 1024 / 1024 / 1024).toFixed(
@@ -256,6 +315,10 @@ main().catch((e) => {
   state.error = String((e && e.stack) || e);
   writeProgress();
   clearInterval(progressTimer);
+  clearInterval(liveTimer);
+  try {
+    fs.rmSync(LIVE_FILE, { force: true });
+  } catch (_) {}
   console.error(e);
   process.exitCode = 1;
 });
@@ -263,5 +326,10 @@ main().catch((e) => {
 process.on('SIGINT', () => {
   state.phase = 'cancelled';
   writeProgress();
+  clearInterval(progressTimer);
+  clearInterval(liveTimer);
+  try {
+    fs.rmSync(LIVE_FILE, { force: true });
+  } catch (_) {}
   process.exit(130);
 });

@@ -16,6 +16,7 @@ const DATA_DIR = process.env.CDRIVE_DATA_DIR
   : path.join(APP_DIR, 'data');
 const SCAN_FILE = path.join(DATA_DIR, 'scan.json');
 const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
+const LIVE_FILE = path.join(DATA_DIR, 'scan.live.json');
 const RENAME_FILE = path.join(DATA_DIR, 'scan.json.tmp');
 const RECYCLE_PS1 = path.join(APP_DIR, 'recycle.ps1');
 const PORT = Number(process.env.PORT || 17878);
@@ -128,10 +129,81 @@ function loadScan(force = false) {
 }
 loadScan(true);
 
+let live = null;
+let liveMtime = 0;
+let liveMap = new Map();
+
+function loadLive(force = false) {
+  try {
+    const st = fs.statSync(LIVE_FILE);
+    if (!force && live && st.mtimeMs === liveMtime) return true;
+    const data = JSON.parse(fs.readFileSync(LIVE_FILE, 'utf8'));
+    if (!data || !data.dirs) return false;
+    const map = new Map(Object.entries(data.dirs));
+    const children = new Map();
+    for (const [key, rec] of map) {
+      if (!rec.parent) continue;
+      if (!children.has(rec.parent)) children.set(rec.parent, []);
+      const parentRec = map.get(rec.parent);
+      const name = parentRec
+        ? String(rec.p).slice(String(parentRec.p).length).replace(/^\\/, '')
+        : path.win32.basename(rec.p);
+      children.get(rec.parent).push([name, rec.s, key]);
+    }
+    for (const [parentKey, list] of children) {
+      list.sort((a, b) => b[1] - a[1]);
+      const parentRec = map.get(parentKey);
+      if (!parentRec) continue;
+      const listed = list.slice(0, 300);
+      let omitted = 0;
+      for (let i = 300; i < list.length; i++) omitted += list[i][1];
+      parentRec.c = listed.map((x) => [x[0], x[1]]);
+      parentRec.childKeys = listed.map((x) => x[2]);
+      parentRec.listedChildSize = listed.reduce((s, x) => s + x[1], 0);
+      parentRec.omittedChildSize = omitted;
+    }
+    live = data;
+    liveMap = map;
+    liveMtime = st.mtimeMs;
+    return true;
+  } catch (_) {
+    live = null;
+    liveMap = new Map();
+    liveMtime = 0;
+    return false;
+  }
+}
+
+function isScanning(progress = cachedProgress()) {
+  return !!(progress && progress.phase === 'scanning' && progress.ageMs < 12000);
+}
+
+function liveRecord(key) {
+  const rec = liveMap.get(key);
+  if (!rec) return null;
+  const listed = rec.listedChildSize || 0;
+  return {
+    p: rec.p,
+    s: rec.s,
+    d: rec.d || 0,
+    fc: 0,
+    dc: rec.dc || (rec.c ? rec.c.length : 0),
+    c: rec.c || [],
+    o: rec.omittedChildSize || Math.max(0, rec.s - (rec.d || 0) - listed),
+    e: 0,
+    live: true,
+  };
+}
+
 function cachedRec(p) {
+  const key = keyOf(p);
+  if (isScanning()) {
+    const lr = liveRecord(key);
+    if (lr) return lr;
+  }
   if (!scan) loadScan();
   if (!scan) return null;
-  return dirsMap.get(keyOf(p)) || null;
+  return dirsMap.get(key) || null;
 }
 
 let saveTimer = null;
@@ -158,6 +230,12 @@ function readProgress() {
   } catch (_) {
     return null;
   }
+}
+
+let progressCache = { at: 0, value: null };
+function cachedProgress() {
+  if (Date.now() - progressCache.at > 500) progressCache = { at: Date.now(), value: readProgress() };
+  return progressCache.value;
 }
 
 // ---------- 磁盘容量 ----------
@@ -291,7 +369,8 @@ async function getPathSize(p) {
   return value;
 }
 
-async function listDirectory(p) {
+async function listDirectory(p, opts = {}) {
+  const liveMode = !!opts.live;
   const rec = cachedRec(p);
   let entries;
   try {
@@ -321,8 +400,12 @@ async function listDirectory(p) {
       if (found) size = found[1];
     }
     if (size == null) {
-      const m = await getPathSize(childPath);
-      size = m.size;
+      if (liveMode) {
+        size = 0;
+      } else {
+        const m = await getPathSize(childPath);
+        size = m.size;
+      }
     }
     const childPreview = childRec && childRec.c ? childRec.c.slice(0, 14).map((x) => [x[0], x[1]]) : [];
     dirs.push({
@@ -339,26 +422,28 @@ async function listDirectory(p) {
   const omittedDirSize = dirs.slice(400).reduce((s, d) => s + d.size, 0);
 
   // 文件清单：读取大文件名字，超出预算则用扫描快照的总量补足
-  const deadline = Date.now() + 3000;
   const files = [];
-  for (let i = 0; i < fileEntries.length; i += 48) {
-    if (Date.now() > deadline && files.length > 50) break;
-    const chunk = fileEntries.slice(i, i + 48);
-    await Promise.all(
-      chunk.map(async (ent) => {
-        try {
-          const full = path.win32.join(p, ent.name);
-          const st = await fsp.stat(full);
-          files.push({
-            name: ent.name,
-            path: full,
-            size: st.size,
-            ext: path.win32.extname(ent.name).toLowerCase(),
-            protected: false,
-          });
-        } catch (_) {}
-      })
-    );
+  if (!liveMode) {
+    const deadline = Date.now() + 3000;
+    for (let i = 0; i < fileEntries.length; i += 48) {
+      if (Date.now() > deadline && files.length > 50) break;
+      const chunk = fileEntries.slice(i, i + 48);
+      await Promise.all(
+        chunk.map(async (ent) => {
+          try {
+            const full = path.win32.join(p, ent.name);
+            const st = await fsp.stat(full);
+            files.push({
+              name: ent.name,
+              path: full,
+              size: st.size,
+              ext: path.win32.extname(ent.name).toLowerCase(),
+              protected: false,
+            });
+          } catch (_) {}
+        })
+      );
+    }
   }
   files.sort((a, b) => b.size - a.size);
 
@@ -396,6 +481,8 @@ async function listDirectory(p) {
       note: '更多小目录 / 快照中未展开的项目',
     },
     cached: !!rec,
+    live: liveMode,
+    liveMtime: liveMode ? liveMtime : 0,
     scannedAt: scan ? scan.scannedAt : null,
   };
 }
@@ -938,6 +1025,13 @@ function startScan() {
   const prog = readProgress();
   if (scanProcess && !scanProcess.killed) return { started: false, reason: '正在扫描' };
   if (prog && prog.phase === 'scanning' && prog.ageMs < 8000) return { started: false, reason: '正在扫描' };
+  live = null;
+  liveMap = new Map();
+  liveMtime = 0;
+  progressCache = { at: 0, value: null };
+  try {
+    fs.rmSync(LIVE_FILE, { force: true });
+  } catch (_) {}
   scanProcess = spawn(process.execPath, [path.join(APP_DIR, 'scan.js')], {
     cwd: APP_DIR,
     detached: false,
@@ -964,34 +1058,47 @@ async function handleApi(req, res, urlObj) {
     }
     const drive = await getDriveInfo();
     const progress = readProgress();
+    const scanning = isScanning(progress);
+    if (scanning) loadLive();
     let root = null;
-    if (scan) {
-      const rec = dirsMap.get('c:\\');
-      if (rec) {
-        root = {
-          path: rec.p,
-          size: rec.s,
-          directFilesSize: rec.d,
-          dirs: (rec.c || []).map(([name, size]) => ({
+    const rootRec = cachedRec('C:\\');
+    if (rootRec) {
+      root = {
+        path: rootRec.p,
+        size: rootRec.s,
+        directFilesSize: rootRec.d,
+        dirs: (rootRec.c || []).map(([name, size]) => {
+          const childPath = path.win32.join(rootRec.p, name);
+          return {
             name,
-            path: path.win32.join(rec.p, name),
+            path: childPath,
             size,
-            cached: !!cachedRec(path.win32.join(rec.p, name)),
-          })),
-          otherSize: rec.o || 0,
-        };
-      }
+            cached: !!cachedRec(childPath),
+          };
+        }),
+        otherSize: rootRec.o || 0,
+      };
     }
+    const liveStats =
+      scanning && live
+        ? {
+            dirs: (live.stats && live.stats.dirs) || 0,
+            files: (live.stats && live.stats.files) || 0,
+            bytes: (rootRec && rootRec.s) || (live.stats && live.stats.bytes) || 0,
+          }
+        : null;
     json(res, 200, {
       drive,
-      scan: scan
-        ? {
-            scannedAt: scan.scannedAt,
-            elapsedMs: scan.elapsedMs,
-            stats: scan.stats,
-            modifiedAt: scan.modifiedAt || null,
-          }
-        : null,
+      scan:
+        scan || liveStats
+          ? {
+              scannedAt: (live && scanning ? live.generatedAt : scan && scan.scannedAt) || null,
+              elapsedMs: (live && scanning ? live.elapsedMs : scan && scan.elapsedMs) || null,
+              stats: liveStats || (scan && scan.stats),
+              modifiedAt: scan ? scan.modifiedAt || null : null,
+              live: !!liveStats,
+            }
+          : null,
       root,
       progress,
       app: { port: PORT, node: process.version },
@@ -1000,7 +1107,15 @@ async function handleApi(req, res, urlObj) {
   }
 
   if (route === '/api/status') {
-    json(res, 200, { progress: readProgress(), scanMtime });
+    const progress = readProgress();
+    const scanning = isScanning(progress);
+    if (scanning) loadLive();
+    json(res, 200, {
+      progress,
+      scanMtime,
+      liveMtime: scanning ? liveMtime : 0,
+      liveBytes: scanning && live ? Number((live.stats && live.stats.bytes) || 0) : 0,
+    });
     return;
   }
 
@@ -1015,7 +1130,11 @@ async function handleApi(req, res, urlObj) {
       return;
     }
     try {
-      const data = await listDirectory(p);
+      const progress = readProgress();
+      const scanning = isScanning(progress);
+      if (scanning) loadLive();
+      const liveMode = urlObj.searchParams.get('live') === '1' && scanning;
+      const data = await listDirectory(p, { live: liveMode });
       if (keyOf(p) === 'c:\\') {
         const [drive, locked] = await Promise.all([getDriveInfo(), getRootLockedFiles()]);
         if (drive && drive.used > data.size) {
@@ -1064,18 +1183,20 @@ async function handleApi(req, res, urlObj) {
       json(res, 200, { results: [] });
       return;
     }
-    if (!scan) loadScan(true);
+    const progress = readProgress();
+    const scanning = isScanning(progress);
+    if (scanning) loadLive();
+    if (!scanning && !scan) loadScan(true);
+    const source = scanning && liveMap.size ? Array.from(liveMap.values()) : scan ? Array.from(dirsMap.values()) : [];
     const results = [];
-    if (scan) {
-      for (const rec of dirsMap.values()) {
-        if (!rec || !rec.p) continue;
-        if (rec.p.toLowerCase().includes(q)) {
-          results.push({ name: rec.p.split('\\').filter(Boolean).pop() || rec.p, path: rec.p, size: rec.s });
-        }
+    for (const rec of source) {
+      if (!rec || !rec.p) continue;
+      if (rec.p.toLowerCase().includes(q)) {
+        results.push({ name: rec.p.split('\\').filter(Boolean).pop() || rec.p, path: rec.p, size: rec.s });
       }
     }
     results.sort((a, b) => b.size - a.size);
-    json(res, 200, { results: results.slice(0, 60) });
+    json(res, 200, { results: results.slice(0, 60), live: scanning });
     return;
   }
 
@@ -1123,6 +1244,9 @@ async function handleApi(req, res, urlObj) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     if (!checkCsrf(req)) return json(res, 403, { error: '校验失败，请刷新页面' });
     if (!IS_WIN) return json(res, 400, { error: '仅支持 Windows' });
+    if (isScanning()) {
+      return json(res, 409, { error: '扫描进行中，请等待扫描完成后再删除', scanning: true });
+    }
     const body = await readBody(req);
     if (!Array.isArray(body.paths) || !body.paths.length) {
       return json(res, 400, { error: '未选择任何项目' });

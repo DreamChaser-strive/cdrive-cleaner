@@ -8,13 +8,15 @@
 
 ## 下载桌面应用（推荐）
 
-前往 **[Releases](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/latest)** 下载：
+直接下载应用文件：**[CDriveCleaner-1.1.1-portable.exe](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/download/v1.1.1/CDriveCleaner-1.1.1-portable.exe)**
 
-```text
-CDriveCleaner-1.1.0-portable.exe
-```
+也可以进入 **[Releases 页面](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/latest)** 下载最新版。
 
-双击即可运行，无需安装 Node.js，也无需打开命令行。
+> 请不要下载页面底部的 `Source code (zip)`，那只是源码压缩包，不包含应用程序。应用文件必须以 `.exe` 结尾，文件名类似 `CDriveCleaner-1.1.1-portable.exe`。
+
+如果你已经下载了源码 ZIP，解压后双击 **`download-app.bat`**，脚本会从 Releases 自动下载最新 exe 到当前目录。
+
+双击 exe 即可运行，无需安装 Node.js，也无需打开命令行。
 
 - 首次启动会自动扫描 C 盘，通常需要约 1 分钟，界面会显示进度。
 - 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，仅在本机使用。
@@ -24,6 +26,7 @@ CDriveCleaner-1.1.0-portable.exe
 ## 功能
 
 - **方块空间图**：按文件大小绘制可交互的 treemap，单击选中、双击进入目录。
+- **实时扫描**：重新扫描时方块和容量条会随着已发现的文件持续变化，不必等扫描结束。
 - **目录明细**：查看子目录和文件大小，支持按大小排序、搜索和路径跳转。
 - **清理建议**：区分「推荐清理」「谨慎清理」「系统项目」，避免误删关键数据。
 - **两种删除方式**：默认移入回收站；永久删除需要二次勾选确认。
@@ -54,7 +57,7 @@ npm install
 npm run build:win
 ```
 
-生成的文件位于 `dist/CDriveCleaner-1.1.0-portable.exe`。
+生成的文件位于 `dist/CDriveCleaner-1.1.1-portable.exe`。
 
 ### 浏览器模式创建桌面快捷方式
 
@@ -65,7 +68,7 @@ npm run build:win
 - **单击**方块：在右侧查看该目录或文件的详细信息。
 - **双击**方块或点击行尾箭头：进入该目录。
 - 勾选列表中的项目可批量删除；顶部「清理建议」可以快速选中常见缓存。
-- 右上角「重新扫描」会重新统计整个 C 盘，旧数据在扫描完成前仍可浏览。
+- 右上角「重新扫描」会实时刷新方块图；扫描期间仍可浏览和搜索，但删除按钮会暂时锁定，避免统计结果变化。
 - 删除成功后，界面中的大小和总量会同步扣减，无需刷新页面。
 
 ## 关于删除
@@ -92,6 +95,8 @@ cdrive-cleaner/
 ├─ server.js                  # 本地 HTTP 服务与删除 API
 ├─ recycle.ps1                # 调用 Windows 回收站 API
 ├─ electron-builder.yml       # Windows 打包配置
+├─ download-app.bat           # 从 Releases 下载最新 exe（源码 ZIP 用户用）
+├─ download-app.ps1           # 下载脚本
 ├─ 启动C盘空间清理.bat         # 浏览器模式启动入口（开发用）
 ├─ create-shortcut.bat        # 浏览器模式快捷方式
 ├─ create-shortcut.ps1        # 快捷方式创建逻辑

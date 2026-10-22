@@ -182,6 +182,7 @@ if (!gotSingleInstanceLock) {
         nodeIntegration: false,
         sandbox: true,
         spellcheck: false,
+        backgroundThrottling: false,
       },
     });
 

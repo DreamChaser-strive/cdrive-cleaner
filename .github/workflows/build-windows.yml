@@ -1,0 +1,86 @@
+name: Build Windows portable
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build portable app
+        run: npm run build:win
+
+      - name: Write checksum
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist -Filter 'CDriveCleaner-*-portable.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Portable executable was not produced.' }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe.FullName).Hash.ToLower()
+          "$hash  $($exe.Name)" | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: C盘空间清理 ${{ github.ref_name }} · Windows 桌面版
+          files: |
+            dist/CDriveCleaner-*-portable.exe
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+          body: |
+            ## 下载
+
+            下载本页附带的 **CDriveCleaner-*-portable.exe**（Windows x64 便携版），双击即可运行。不需要安装 Node.js，也不需要打开命令行或浏览器。
+
+            首次启动会自动扫描 C 盘，通常约 1 分钟，界面会显示实时进度；扫描结果只保存在本机。
+
+            ## 功能
+
+            - 方块空间图：按文件大小绘制可交互的 treemap，单击选中、双击进入目录。
+            - 目录明细与搜索：按大小排序、查看子目录和文件，支持全盘搜索目录。
+            - 清理建议：区分推荐清理、谨慎清理和系统项目。
+            - 两种删除方式：默认移入回收站；永久删除需要二次勾选确认。
+            - 安全防护：只允许 C 盘路径，系统目录、用户主目录和程序目录会被拒绝。
+
+            ## 使用提醒
+
+            - 应用未做代码签名，Windows SmartScreen 可能提示「Windows 已保护你的电脑」。点击「更多信息」→「仍要运行」即可。
+            - 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，重开应用无需重新扫描。
+            - 本工具会执行真实文件删除操作，请先备份重要数据，只清理确认无用的缓存或测试文件。
+            - Windows、Program Files、ProgramData、用户主目录等系统/个人目录受保护，工具不会直接删除。
+
+            ## 文件校验
+
+            下载附带的 `SHA256SUMS.txt` 可核对 exe 的 SHA-256。
+
+            ## 从源码运行
+
+            ```bash
+            git clone https://github.com/DreamChaser-strive/cdrive-cleaner.git
+            cd cdrive-cleaner
+            npm install
+            npm start
+            ```
+
+            详细说明见仓库 README。

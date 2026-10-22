@@ -11,7 +11,9 @@ const crypto = require('crypto');
 
 const APP_DIR = __dirname;
 const PUBLIC_DIR = path.join(APP_DIR, 'public');
-const DATA_DIR = path.join(APP_DIR, 'data');
+const DATA_DIR = process.env.CDRIVE_DATA_DIR
+  ? path.resolve(process.env.CDRIVE_DATA_DIR)
+  : path.join(APP_DIR, 'data');
 const SCAN_FILE = path.join(DATA_DIR, 'scan.json');
 const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
 const RENAME_FILE = path.join(DATA_DIR, 'scan.json.tmp');
@@ -57,6 +59,7 @@ const BLOCKED_EXACT = new Set(
     path.join(HOME, '.gnupg').toLowerCase(),
     path.join(HOME, '..', 'Public').toLowerCase(),
     APP_DIR.toLowerCase(),
+    DATA_DIR.toLowerCase(),
   ].map((x) => x.replace(/\\+$/, '').toLowerCase())
 );
 const BLOCKED_PREFIXES = [

@@ -2,7 +2,24 @@
 
 一个在本机运行的 Windows C 盘空间可视化分析与清理工具。用方块图直接看谁在占用空间，逐层点开查看目录明细，并在同一个界面里把不需要的内容移入回收站或永久删除。
 
-> 只监听 `127.0.0.1`，扫描结果不会离开你的电脑；仓库中不包含任何本机扫描数据。
+桌面版是独立的 Windows 应用，带原生窗口，不需要安装 Node.js；浏览器版仍可从源码运行。
+
+> 只监听本机 `127.0.0.1`，扫描结果不会离开你的电脑，仓库和安装包中都不包含任何本机扫描数据。
+
+## 下载桌面应用（推荐）
+
+前往 **[Releases](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/latest)** 下载：
+
+```text
+CDriveCleaner-1.1.0-portable.exe
+```
+
+双击即可运行，无需安装 Node.js，也无需打开命令行。
+
+- 首次启动会自动扫描 C 盘，通常需要约 1 分钟，界面会显示进度。
+- 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，仅在本机使用。
+- 应用未做代码签名，Windows SmartScreen 可能提示「Windows 已保护你的电脑」。点击「更多信息」→「仍要运行」即可。
+- 便携版可以放在任意文件夹；右键 exe →「发送到」→「桌面快捷方式」即可固定到桌面。
 
 ## 功能
 
@@ -11,39 +28,37 @@
 - **清理建议**：区分「推荐清理」「谨慎清理」「系统项目」，避免误删关键数据。
 - **两种删除方式**：默认移入回收站；永久删除需要二次勾选确认。
 - **安全防护**：仅允许 C 盘路径，系统目录、用户主目录、程序目录和工具自身目录会被拒绝。
-- **本地服务**：随机请求令牌 + 仅本机访问，不依赖云端，不需要安装第三方 npm 包。
+- **本地服务**：随机请求令牌 + 仅本机访问，不依赖云端。
+- **桌面封装**：Electron 原生窗口、单实例运行，关闭窗口即退出后台服务。
 
-## 环境要求
+## 从源码运行
 
-- Windows 10 / 11
-- [Node.js](https://nodejs.org/) 18 或更高版本
-- Windows 自带的 PowerShell（用于移入回收站）
-
-不需要管理员权限。
-
-## 快速开始
-
-### 方式一：双击启动（推荐）
-
-1. 下载或克隆本项目。
-2. 双击 **`启动C盘空间清理.bat`**。
-3. 首次运行会自动扫描 C 盘（通常约 1 分钟），完成后浏览器自动打开界面。
-4. 使用期间保留命令行窗口，关闭窗口即停止本地服务。
-
-### 方式二：命令行
+需要 Windows 10 / 11、[Node.js](https://nodejs.org/) 18 或更高版本。不需要管理员权限。
 
 ```bash
 git clone https://github.com/DreamChaser-strive/cdrive-cleaner.git
 cd cdrive-cleaner
-npm run scan     # 生成扫描数据，首次使用或需要刷新时执行
-npm start        # 启动本地界面，默认地址 http://127.0.0.1:17878/
+npm install
+
+npm start          # 以桌面窗口运行
+npm run start:web  # 以浏览器模式运行：http://127.0.0.1:17878/
+npm run scan       # 单独重新扫描 C 盘
 ```
 
-也可以直接用 `node scan.js` 和 `node server.js`。
+桌面版通过 `electron/main.js` 启动：自动选择本机空闲端口、启动后台服务、打开原生窗口，并在退出时结束服务与扫描进程。
 
-### 创建桌面快捷方式
+### 打包 Windows 应用
 
-双击 **`create-shortcut.bat`**，会在桌面生成「C盘空间清理」快捷方式，之后双击即可运行。移动项目目录后重新执行一次该脚本即可。
+```bash
+npm install
+npm run build:win
+```
+
+生成的文件位于 `dist/CDriveCleaner-1.1.0-portable.exe`。
+
+### 浏览器模式创建桌面快捷方式
+
+双击 **`create-shortcut.bat`**，会生成指向浏览器模式启动入口的快捷方式。桌面版用户不需要这一步，直接给 exe 创建快捷方式即可。
 
 ## 使用说明
 
@@ -61,30 +76,37 @@ npm start        # 启动本地界面，默认地址 http://127.0.0.1:17878/
 
 ## 数据与隐私
 
-扫描结果保存在本地的 `data/scan.json` 和 `data/progress.json`，其中包含本机真实目录路径，因此已加入 `.gitignore`，不会被提交。界面的所有请求只在 `127.0.0.1` 上处理。
+- 桌面版数据目录：`%APPDATA%\CDriveCleaner\data`
+- 源码运行数据目录：项目下的 `data/`
+- 扫描结果包含本机真实目录路径，已加入 `.gitignore`，不会提交，也不会打包进 exe。
+- 界面的所有请求只在 `127.0.0.1` 上处理。
 
 ## 项目结构
 
 ```text
 cdrive-cleaner/
+├─ electron/main.js           # 桌面应用入口（窗口、后台服务生命周期）
 ├─ public/                    # 前端界面（Canvas treemap + 列表）
-├─ scan.js                    # C 盘扫描器，输出 data/scan.json
+├─ build/                     # 应用图标
+├─ scan.js                    # C 盘扫描器
 ├─ server.js                  # 本地 HTTP 服务与删除 API
 ├─ recycle.ps1                # 调用 Windows 回收站 API
-├─ 启动C盘空间清理.bat         # 启动入口（首次运行会自动扫描）
-├─ create-shortcut.bat         # 生成桌面快捷方式
-├─ create-shortcut.ps1         # 快捷方式创建逻辑
-└─ data/                      # 本地扫描数据（不提交）
+├─ electron-builder.yml       # Windows 打包配置
+├─ 启动C盘空间清理.bat         # 浏览器模式启动入口（开发用）
+├─ create-shortcut.bat        # 浏览器模式快捷方式
+├─ create-shortcut.ps1        # 快捷方式创建逻辑
+└─ data/                      # 源码模式的本地扫描数据（不提交）
 ```
 
 ## 已知限制
 
-- 只支持 Windows，且目前只扫描 C 盘。
+- 只支持 Windows x64，且目前只扫描 C 盘。
 - 显示的是文件逻辑大小，与资源管理器或磁盘占用可能略有差异。
 - 扫描会跳过符号链接和 junction，避免重复计算与死循环。
 - 部分受系统保护的位置可能无法读取，错误会被跳过，不影响其余结果。
 - `pagefile.sys`、`hiberfil.sys`、系统还原点等不建议直接删除，界面会以系统项目单独展示。
 - 若文件正被其他程序占用，删除可能失败；关闭对应程序后重试。
+- 便携版未签名，首次运行可能触发 SmartScreen 提示。
 
 ## 免责声明
 

@@ -11,7 +11,9 @@ const fsp = fs.promises;
 const path = require('path');
 
 const ROOT = 'C:\\';
-const OUT_DIR = path.join(__dirname, 'data');
+const OUT_DIR = process.env.CDRIVE_DATA_DIR
+  ? path.resolve(process.env.CDRIVE_DATA_DIR)
+  : path.join(__dirname, 'data');
 const OUT_FILE = path.join(OUT_DIR, 'scan.json');
 const PROGRESS_FILE = path.join(OUT_DIR, 'progress.json');
 const TMP_FILE = path.join(OUT_DIR, 'scan.json.tmp');

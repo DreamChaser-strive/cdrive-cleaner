@@ -1,0 +1,14 @@
+{
+  "name": "cdrive-cleaner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Windows C 盘空间可视化分析与安全清理工具",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "scan": "node scan.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C 盘空间清理 · C: Drive Analyzer</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<svg class="svg-sprite" aria-hidden="true">
+  <symbol id="i-drive" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 14h18"/><circle cx="17.5" cy="16.8" r=".9" fill="currentColor" stroke="none"/><path d="M7 8.5h6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.2A2.2 2.2 0 0 1 5.7 5h4.1l2 2.2h6.5a2.2 2.2 0 0 1 2.2 2.2v7.4a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17l4.8-4.5 3.2 2.8 3-2.4 4 4.1"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="12.5" height="13" rx="2"/><path d="M16 10l4.2-2.3v8.6L16 14"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M10 4v3h4V4M10 10h4M10 13h4M10 16h4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5L8 12l6.5 7"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M5 14.5L12 8l7 6.5M12 8v12"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.2"/><path d="M15 15l5 5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.1 6.3"/><path d="M20 4.5V11h-6.3"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9 6.5V4.7c0-.7.5-1.2 1.2-1.2h3.6c.7 0 1.2.5 1.2 1.2v1.8M7 6.5l.8 13c.1.9.8 1.5 1.7 1.5h5c.9 0 1.6-.6 1.7-1.5l.8-13"/><path d="M10 10.5v6M14 10.5v6"/></symbol>
+  <symbol id="i-recycle" viewBox="0 0 24 24"><path d="M7.5 8.5h9l-.8 11.2c-.1.8-.7 1.3-1.5 1.3h-4.4c-.8 0-1.4-.5-1.5-1.3z"/><path d="M6 8.5h12M10 8.5V6h4v2.5M10 12v5M14 12v5"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v6M12 7.6v.2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 9.5v4.5M12 17.2v.2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l8 4.5-8 4.5-8-4.5z"/><path d="M4 13l8 4.5 8-4.5M4 16.8L12 21l8-4.2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.2l3.5 2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.2a2.5 2.5 0 1 1 4.1 2c-.9.7-1.7 1.2-1.7 2.6M12 17.2v.2"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark"><svg><use href="#i-drive"/></svg></div>
+    <div class="brand-text">
+      <h1>C 盘空间清理</h1>
+      <p>点选方块查看占用 · 双击进入目录</p>
+    </div>
+  </div>
+
+  <div class="capacity" id="capacity">
+    <div class="cap-head">
+      <span class="cap-title"><svg><use href="#i-drive"/></svg> Windows (C:)</span>
+      <span class="cap-stats" id="capStats">正在读取磁盘容量…</span>
+    </div>
+    <div class="cap-bar" id="capBar">
+      <div class="cap-seg seg-scan" id="segScan"></div>
+      <div class="cap-seg seg-system" id="segSystem"></div>
+      <div class="cap-seg seg-free" id="segFree"></div>
+    </div>
+    <div class="cap-legend" id="capLegend">
+      <span><i class="dot dot-scan"></i>已分析</span>
+      <span><i class="dot dot-system"></i>系统 / 未扫描</span>
+      <span><i class="dot dot-free"></i>可用</span>
+    </div>
+  </div>
+
+  <div class="top-actions">
+    <button class="btn btn-accent" id="suggestBtn"><svg><use href="#i-sparkles"/></svg> 清理建议</button>
+    <button class="btn btn-ghost on-dark" id="rescanBtn"><svg><use href="#i-refresh"/></svg> 重新扫描</button>
+    <button class="icon-btn on-dark" id="helpBtn" title="使用说明"><svg><use href="#i-help"/></svg></button>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="nav-buttons">
+    <button class="icon-btn" id="backBtn" title="后退"><svg><use href="#i-back"/></svg></button>
+    <button class="icon-btn" id="upBtn" title="上一级"><svg><use href="#i-up"/></svg></button>
+  </div>
+  <nav class="breadcrumbs" id="breadcrumbs" aria-label="路径"></nav>
+  <div class="toolbar-spacer"></div>
+  <button class="toggle-btn" id="nestToggle" title="在每个方块内显示子目录分布">
+    <svg><use href="#i-layers"/></svg><span>嵌套预览</span><i class="switch on"></i>
+  </button>
+  <div class="search-wrap" id="searchWrap">
+    <svg class="search-icon"><use href="#i-search"/></svg>
+    <input id="searchInput" type="text" autocomplete="off" spellcheck="false" placeholder="搜索整个 C 盘，例如 .cache、node_modules" />
+    <kbd>Enter</kbd>
+    <div class="search-dropdown hidden" id="searchDropdown"></div>
+  </div>
+  <div class="scan-chip hidden" id="scanChip"><span class="pulse"></span><span id="scanChipText">扫描中…</span></div>
+</div>
+
+<main class="workspace">
+  <section class="treemap-panel" id="treemapPanel">
+    <div class="canvas-holder" id="canvasHolder">
+      <canvas id="treemap"></canvas>
+      <div class="canvas-title" id="canvasTitle"></div>
+      <div class="legend">
+        <span><i class="lg lg-dir"></i>目录</span>
+        <span><i class="lg lg-file"></i>文件</span>
+        <span><i class="lg lg-system"></i>系统区域</span>
+        <span class="legend-hint">灰色斜纹 = 不可直接清理</span>
+      </div>
+      <div class="canvas-loading hidden" id="canvasLoading">
+        <div class="loader"></div><span>正在读取目录…</span>
+      </div>
+      <div class="canvas-empty hidden" id="canvasEmpty"></div>
+      <div class="tooltip hidden" id="tooltip"></div>
+    </div>
+  </section>
+
+  <aside class="inspector" id="inspector">
+    <div class="inspector-head" id="inspectorHead"></div>
+    <div class="list-bar">
+      <div class="list-bar-title">当前目录内容 <span id="listCount"></span></div>
+      <div class="list-bar-actions">
+        <button class="mini-btn" id="selectAllBtn" title="选择当前目录中所有可清理项目">全选</button>
+        <button class="mini-btn" id="clearSelBtn" title="清除选择">清空</button>
+      </div>
+    </div>
+    <div class="item-list" id="itemList"></div>
+    <div class="selection-tray hidden" id="selectionTray">
+      <div class="tray-info"><b id="trayCount">0</b> 项已选 <span id="traySize">0 B</span></div>
+      <div class="tray-actions">
+        <button class="btn btn-danger btn-sm" id="trayDeleteBtn"><svg><use href="#i-trash"/></svg> 删除所选</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <div class="status-left" id="statusLeft">正在加载…</div>
+  <div class="status-right">
+    <span class="status-tip"><kbd>单击</kbd> 选中 <kbd>双击</kbd> 进入 <kbd>Ctrl</kbd>+单击 多选</span>
+    <span class="status-sep"></span>
+    <button class="text-btn" id="recycleBtn"><svg><use href="#i-recycle"/></svg> 回收站</button>
+  </div>
+</footer>
+
+<div class="scrim hidden" id="scrim"></div>
+
+<aside class="drawer hidden" id="suggestDrawer" aria-label="清理建议">
+  <div class="drawer-head">
+    <div>
+      <h2><svg><use href="#i-sparkles"/></svg> 清理建议</h2>
+      <p>基于本次扫描结果，勾选后统一移到回收站；请先确认内容用途。</p>
+    </div>
+    <button class="icon-btn" id="closeDrawerBtn"><svg><use href="#i-close"/></svg></button>
+  </div>
+  <div class="drawer-body" id="suggestBody">
+    <div class="drawer-loading"><div class="loader"></div><span>正在统计可清理项目…</span></div>
+  </div>
+  <div class="drawer-foot">
+    <label class="select-safe"><input type="checkbox" id="selectSafeChk"> 选择全部安全项</label>
+    <div class="drawer-total">已选 <b id="suggestTotal">0 B</b></div>
+    <button class="btn btn-accent" id="suggestDeleteBtn" disabled><svg><use href="#i-recycle"/></svg> 移到回收站</button>
+  </div>
+</aside>
+
+<div class="modal-wrap hidden" id="deleteModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-icon" id="deleteIcon"><svg><use href="#i-recycle"/></svg></div>
+      <div>
+        <h2 id="deleteTitle">移到回收站</h2>
+        <p id="deleteSub">这些项目将从原位置移除。</p>
+      </div>
+      <button class="icon-btn" id="closeDeleteBtn"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="delete-summary">
+      <div class="delete-total"><span id="deleteTotal">0 B</span><small id="deleteCount">0 项</small></div>
+      <div class="delete-list" id="deleteList"></div>
+    </div>
+    <div class="notice" id="deleteNotice"></div>
+    <label class="confirm-line hidden" id="permanentConfirmLine">
+      <input type="checkbox" id="permanentConfirm">
+      <span>我确认永久删除，删除后无法恢复。</span>
+    </label>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="cancelDeleteBtn">取消</button>
+      <button class="btn btn-danger" id="confirmDeleteBtn">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-wrap hidden" id="resultModal">
+  <div class="modal modal-small">
+    <div class="modal-head">
+      <div class="modal-icon" id="resultIcon"><svg><use href="#i-check"/></svg></div>
+      <div><h2 id="resultTitle">操作完成</h2><p id="resultSub"></p></div>
+      <button class="icon-btn" id="closeResultBtn"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="result-list" id="resultList"></div>
+    <div class="modal-foot"><button class="btn btn-accent" id="resultOkBtn">知道了</button></div>
+  </div>
+</div>
+
+<div class="modal-wrap hidden" id="helpModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-icon"><svg><use href="#i-help"/></svg></div>
+      <div><h2>使用说明</h2><p>这是一个完全在本机运行的空间分析与清理工具。</p></div>
+      <button class="icon-btn" id="closeHelpBtn"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="help-body">
+      <div class="help-grid">
+        <div><b>看空间</b><p>方块面积 = 占用大小。单击选中，右侧查看该目录/文件详情；双击目录进入下一层。面包屑可快速返回。</p></div>
+        <div><b>找大件</b><p>当前目录内容按大小排序；勾选可批量操作。顶部搜索支持全盘目录名或路径片段。</p></div>
+        <div><b>清理</b><p>“移到回收站”可恢复，但不会立即释放 C 盘空间；清空回收站后才会释放。“永久删除”立即释放且不可恢复。</p></div>
+        <div><b>保护</b><p>Windows、Program Files、系统关键文件、个人主目录等已锁定，工具会阻止误删；系统区域会标注为不可直接清理。</p></div>
+      </div>
+      <div class="notice"><svg><use href="#i-info"/></svg><span>建议清理顺序：先看“清理建议”里的安全缓存 → 再检查用户目录中的大文件夹 → 最后处理回收站 / 休眠文件。删除前请确认文件夹用途。</span></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-accent" id="helpOkBtn">开始使用</button></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>window.__CLEANER_TOKEN__ = '__CLEANER_TOKEN_VALUE__';</script>
+<script src="/app.js"></script>
+</body>
+</html>

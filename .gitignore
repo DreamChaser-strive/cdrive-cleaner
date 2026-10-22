@@ -1,0 +1,22 @@
+# 本地扫描结果（包含个人目录路径，不发布）
+data/
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 临时文件
+*.tmp
+*.log
+preview.png
+.tmp-edge/
+
+# 本地快捷方式
+*.lnk
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

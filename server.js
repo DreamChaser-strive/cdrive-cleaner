@@ -1199,7 +1199,7 @@ async function handleApi(req, res, urlObj) {
       drives,
       count: drives.length,
       systemDrive: SYSTEM_DRIVE,
-      current: drives.some((d) => d.letter === current) ? current : drives[0].letter,
+      current: drives.length && drives.some((d) => d.letter === current) ? current : (drives[0] || {}).letter || SYSTEM_DRIVE,
       detectedAt: new Date().toISOString(),
     });
     return;

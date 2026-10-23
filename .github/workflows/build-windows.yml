@@ -32,7 +32,7 @@ jobs:
       - name: Write checksum
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path dist -Filter 'CDriveCleaner-*-portable.exe' | Select-Object -First 1
+          $exe = Get-ChildItem -Path dist -Filter 'DriveCleaner-*-portable.exe' | Select-Object -First 1
           if (-not $exe) { throw 'Portable executable was not produced.' }
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe.FullName).Hash.ToLower()
           "$hash  $($exe.Name)" | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
@@ -43,7 +43,7 @@ jobs:
         with:
           name: 磁盘空间清理 ${{ github.ref_name }} · Windows 桌面版
           files: |
-            dist/CDriveCleaner-*-portable.exe
+            dist/DriveCleaner-*-portable.exe
             dist/SHA256SUMS.txt
           fail_on_unmatched_files: true
           draft: false
@@ -51,7 +51,7 @@ jobs:
           body: |
             ## 下载应用
 
-            请下载本页 **Assets** 中的 **CDriveCleaner-*-portable.exe**（Windows x64 便携版），双击即可运行。不需要安装 Node.js，也不需要打开命令行或浏览器。
+            请下载本页 **Assets** 中的 **DriveCleaner-*-portable.exe**（Windows x64 便携版），双击即可运行。不需要安装 Node.js，也不需要打开命令行或浏览器。
 
             > 页面底部的 `Source code (zip)` 只是源码，不包含应用程序。若已经下载了源码 ZIP，可解压后双击 `download-app.bat` 自动获取最新 exe。
 
@@ -70,7 +70,7 @@ jobs:
             ## 使用提醒
 
             - 应用未做代码签名，Windows SmartScreen 可能提示「Windows 已保护你的电脑」。点击「更多信息」→「仍要运行」即可。
-            - 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，重开应用无需重新扫描。
+            - 扫描数据保存在 `%APPDATA%\DriveCleaner\data`，重开应用无需重新扫描。
             - 扫描进行中仍可浏览和搜索，但删除按钮会暂时锁定，避免统计结果变化。
             - 本工具会执行真实文件删除操作，请先备份重要数据，只清理确认无用的缓存或测试文件。
             - Windows、Program Files、ProgramData、用户主目录等系统/个人目录受保护，工具不会直接删除。
@@ -82,8 +82,8 @@ jobs:
             ## 从源码运行
 
             ```bash
-            git clone https://github.com/DreamChaser-strive/cdrive-cleaner.git
-            cd cdrive-cleaner
+            git clone https://github.com/DreamChaser-strive/drive-cleaner.git
+            cd drive-cleaner
             npm install
             npm start
             ```

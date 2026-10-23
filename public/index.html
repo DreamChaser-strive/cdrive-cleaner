@@ -44,14 +44,17 @@
     </div>
   </div>
 
-  <label class="drive-picker" title="选择要分析的磁盘">
-    <svg><use href="#i-drive"/></svg>
-    <select id="driveSelect" aria-label="选择磁盘"></select>
-  </label>
+  <div class="drive-switch-wrap">
+    <span class="ds-label" id="driveCount" title="自动识别本机实际挂载的磁盘，盘符由系统分配">正在识别本机磁盘…</span>
+    <nav class="drive-switch" id="driveTabs" role="tablist" aria-label="切换磁盘"></nav>
+    <button class="icon-btn on-dark ds-refresh" id="driveRefresh" type="button" title="重新识别本机磁盘（插拔 U 盘、移动硬盘后点一下）">
+      <svg><use href="#i-refresh"/></svg>
+    </button>
+  </div>
 
   <div class="capacity" id="capacity">
     <div class="cap-head">
-      <span class="cap-title" id="capTitle"><svg><use href="#i-drive"/></svg> Windows (C:)</span>
+      <span class="cap-title" id="capTitle"><svg><use href="#i-drive"/></svg> 正在识别磁盘…</span>
       <span class="cap-stats" id="capStats">正在读取磁盘容量…</span>
     </div>
     <div class="cap-bar" id="capBar">

@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-echo Downloading the latest CDriveCleaner portable app from GitHub Releases...
+echo Downloading the latest DriveCleaner portable app from GitHub Releases...
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0download-app.ps1"

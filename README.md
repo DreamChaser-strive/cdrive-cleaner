@@ -1,6 +1,6 @@
 # 磁盘空间清理
 
-一个在本机运行的 Windows 磁盘空间可视化分析与清理工具。可识别本机 C、D、E 等磁盘并切换分析对象，用方块图直接看谁在占用空间，逐层点开查看目录明细，并在同一个界面里把不需要的内容移入回收站或永久删除。
+一个在本机运行的 Windows 磁盘空间可视化分析与清理工具。会自动识别本机实际挂载的全部磁盘（盘符由系统分配，不固定为某几个字母）并切换分析对象，用方块图直接看谁在占用空间，逐层点开查看目录明细，并在同一个界面里把不需要的内容移入回收站或永久删除。
 
 桌面版是独立的 Windows 应用，带原生窗口，不需要安装 Node.js；浏览器版仍可从源码运行。
 
@@ -8,24 +8,24 @@
 
 ## 下载桌面应用（推荐）
 
-直接下载应用文件：**[CDriveCleaner-1.2.0-portable.exe](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/download/v1.2.0/CDriveCleaner-1.2.0-portable.exe)**
+直接下载应用文件：**[DriveCleaner-1.2.1-portable.exe](https://github.com/DreamChaser-strive/drive-cleaner/releases/download/v1.2.1/DriveCleaner-1.2.1-portable.exe)**
 
-也可以进入 **[Releases 页面](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/latest)** 下载最新版。
+也可以进入 **[Releases 页面](https://github.com/DreamChaser-strive/drive-cleaner/releases/latest)** 下载最新版。
 
-> 请不要下载页面底部的 `Source code (zip)`，那只是源码压缩包，不包含应用程序。应用文件必须以 `.exe` 结尾，文件名类似 `CDriveCleaner-1.2.0-portable.exe`。
+> 请不要下载页面底部的 `Source code (zip)`，那只是源码压缩包，不包含应用程序。应用文件必须以 `.exe` 结尾，文件名类似 `DriveCleaner-1.2.1-portable.exe`。
 
 如果你已经下载了源码 ZIP，解压后双击 **`download-app.bat`**，脚本会从 Releases 自动下载最新 exe 到当前目录。
 
 双击 exe 即可运行，无需安装 Node.js，也无需打开命令行。
 
-- 首次启动会自动扫描系统盘，通常需要约 1 分钟；切换到其他磁盘后点击「重新扫描」即可分析该盘。
-- 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，每个盘符单独保存，仅在本机使用。
+- 首次启动会自动扫描系统盘，通常需要约 1 分钟；顶部磁盘标签可切换到本机其他任意磁盘。
+- 扫描数据保存在 `%APPDATA%\DriveCleaner\data`，每个盘符单独保存，仅在本机使用。
 - 应用未做代码签名，Windows SmartScreen 可能提示「Windows 已保护你的电脑」。点击「更多信息」→「仍要运行」即可。
 - 便携版可以放在任意文件夹；右键 exe →「发送到」→「桌面快捷方式」即可固定到桌面。
 
 ## 功能
 
-- **多磁盘切换**：自动识别本机固定磁盘和可移动磁盘，可在 C、D、E 等盘之间切换。
+- **多磁盘切换**：自动识别本机实际挂载的固定磁盘和可移动磁盘（盘符不固定），逐个标签切换；插拔 U 盘、移动硬盘后点刷新按钮或等待约 1 分钟即可重新识别。
 - **方块空间图**：按文件大小绘制可交互的 treemap，单击选中、双击进入目录。
 - **实时扫描**：重新扫描时方块和容量条会随着已发现的文件持续变化，不必等扫描结束。
 - **目录明细**：查看子目录和文件大小，支持按大小排序、搜索和路径跳转。
@@ -40,13 +40,13 @@
 需要 Windows 10 / 11、[Node.js](https://nodejs.org/) 18 或更高版本。不需要管理员权限。
 
 ```bash
-git clone https://github.com/DreamChaser-strive/cdrive-cleaner.git
-cd cdrive-cleaner
+git clone https://github.com/DreamChaser-strive/drive-cleaner.git
+cd drive-cleaner
 npm install
 
 npm start          # 以桌面窗口运行
 npm run start:web  # 以浏览器模式运行：http://127.0.0.1:17878/
-npm run scan       # 单独重新扫描 C 盘
+npm run scan       # 单独重新扫描系统盘
 ```
 
 桌面版通过 `electron/main.js` 启动：自动选择本机空闲端口、启动后台服务、打开原生窗口，并在退出时结束服务与扫描进程。
@@ -58,7 +58,7 @@ npm install
 npm run build:win
 ```
 
-生成的文件位于 `dist/CDriveCleaner-1.1.1-portable.exe`。
+生成的文件位于 `dist/DriveCleaner-1.2.1-portable.exe`。
 
 ### 浏览器模式创建桌面快捷方式
 
@@ -66,7 +66,7 @@ npm run build:win
 
 ## 使用说明
 
-- 顶部磁盘下拉框选择 C、D、E 等磁盘；切换后会自动读取该盘已有扫描结果，没有结果时可点击「重新扫描」。
+- 顶部「磁盘」标签会列出本机实际识别到的每个盘符、卷标和剩余空间（左侧显示识别到的磁盘总数），点击即可切换当前分析对象；标签右侧的刷新按钮可立即重新识别磁盘。
 - **单击**方块：在右侧查看该目录或文件的详细信息。
 - **双击**方块或点击行尾箭头：进入该目录。
 - 勾选列表中的项目可批量删除；顶部「清理建议」可以快速选中常见缓存。
@@ -77,11 +77,11 @@ npm run build:win
 
 **移入回收站**是默认方式，更安全，但在清空回收站之前不会释放磁盘空间。**永久删除**不可恢复，必须额外勾选确认，请只对确认无用的缓存或测试数据使用。
 
-以下位置不会被工具删除：整个 C 盘根目录、Windows、Program Files、ProgramData、用户主目录、桌面/文档/下载等个人目录、应用数据根目录、工具自身目录，以及系统关键文件。需要清理系统组件时，请使用 Windows 设置或官方卸载程序。
+以下位置不会被工具删除：任何磁盘的根目录、系统盘的 Windows、Program Files、ProgramData、用户主目录、桌面/文档/下载等个人目录、应用数据根目录、工具自身目录，以及系统关键文件。需要清理系统组件时，请使用 Windows 设置或官方卸载程序。
 
 ## 数据与隐私
 
-- 桌面版数据目录：`%APPDATA%\CDriveCleaner\data`
+- 桌面版数据目录：`%APPDATA%\DriveCleaner\data`
 - 源码运行数据目录：项目下的 `data/`
 - 系统盘使用 `scan.json`、`progress.json`；其他磁盘使用 `scan.D.json`、`progress.D.json` 等独立文件。
 - 扫描结果包含本机真实目录路径，已加入 `.gitignore`，不会提交，也不会打包进 exe。
@@ -90,7 +90,7 @@ npm run build:win
 ## 项目结构
 
 ```text
-cdrive-cleaner/
+drive-cleaner/
 ├─ electron/main.js           # 桌面应用入口（窗口、后台服务生命周期）
 ├─ public/                    # 前端界面（Canvas treemap + 列表）
 ├─ build/                     # 应用图标
@@ -100,7 +100,7 @@ cdrive-cleaner/
 ├─ electron-builder.yml       # Windows 打包配置
 ├─ download-app.bat           # 从 Releases 下载最新 exe（源码 ZIP 用户用）
 ├─ download-app.ps1           # 下载脚本
-├─ 启动C盘空间清理.bat         # 浏览器模式启动入口（开发用）
+├─ 启动磁盘空间清理.bat       # 浏览器模式启动入口（开发用）
 ├─ create-shortcut.bat        # 浏览器模式快捷方式
 ├─ create-shortcut.ps1        # 快捷方式创建逻辑
 └─ data/                      # 源码模式的本地扫描数据（不提交）

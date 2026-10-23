@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title C Drive Cleaner
+title Disk Space Cleaner
 cd /d "%~dp0"
 
 where node >nul 2>nul
@@ -13,12 +13,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Starting C Drive Cleaner...
+echo Starting Disk Space Cleaner...
 echo The browser will open automatically. Keep this window open while using it.
 echo.
 
 if not exist "data\scan.json" (
-  echo No scan data found. Scanning C: now, this usually takes about a minute...
+  echo No scan data found. Scanning the system drive now, this usually takes about a minute...
   echo.
   node scan.js
   if errorlevel 1 (

@@ -269,42 +269,85 @@ function saveScanSoon(st) {
   }, 800);
 }
 
-// ---------- 磁盘容量与盘符 ----------
+// ---------- 磁盘容量与盘符（完全按本机实际挂载情况识别，不预设盘符） ----------
 let driveListCache = { at: 0, value: null };
 
-function normalizeDriveList(rows) {
-  const drives = rows
-    .map((x) => {
-      const letter = String(x.DeviceID || x.letter || '').charAt(0).toUpperCase();
-      if (!/^[A-Z]$/.test(letter)) return null;
-      const total = Number(x.Size || 0);
-      const free = Number(x.FreeSpace || 0);
-      return {
-        letter,
-        root: driveRoot(letter),
-        label: String(x.VolumeName || '').trim(),
-        total,
-        used: Math.max(0, total - free),
-        free,
-        removable: Number(x.DriveType) === 2,
-        system: letter === SYSTEM_DRIVE,
-      };
-    })
-    .filter((x) => x && x.total > 0)
-    .sort((a, b) => (a.system === b.system ? a.letter.localeCompare(b.letter) : a.system ? -1 : 1));
-  if (!drives.some((d) => d.letter === SYSTEM_DRIVE)) {
-    drives.unshift({
-      letter: SYSTEM_DRIVE,
-      root: driveRoot(SYSTEM_DRIVE),
-      label: '',
-      total: 0,
-      used: 0,
-      free: 0,
-      removable: false,
-      system: true,
-    });
+function makeDrive(letter, info) {
+  const i = info || {};
+  const total = Number(i.total || 0);
+  const free = Number(i.free || 0);
+  return {
+    letter,
+    root: driveRoot(letter),
+    label: String(i.label || '').trim(),
+    total,
+    used: Math.max(0, total - free),
+    free,
+    removable: i.removable === true,
+    system: letter === SYSTEM_DRIVE,
+  };
+}
+
+function sortDrives(drives) {
+  return drives.sort((a, b) => (a.system === b.system ? a.letter.localeCompare(b.letter) : a.system ? -1 : 1));
+}
+
+// 逐个盘符探测本机实际挂载的磁盘：WMI / PowerShell 不可用时的兜底通道
+function probeMountedDrives() {
+  const found = [];
+  for (let code = 65; code <= 90; code++) {
+    const letter = String.fromCharCode(code);
+    const root = driveRoot(letter);
+    try {
+      fs.accessSync(root, fs.constants.R_OK);
+    } catch (_) {
+      continue;
+    }
+    let total = 0;
+    let free = 0;
+    try {
+      if (typeof fs.statfsSync === 'function') {
+        const s = fs.statfsSync(root);
+        total = Number(s.blocks || 0) * Number(s.bsize || 0);
+        free = Number(s.bavail || 0) * Number(s.bsize || 0);
+      }
+    } catch (_) {}
+    if (!(total > 0)) continue;
+    found.push(makeDrive(letter, { total, free }));
   }
-  return drives;
+  return found;
+}
+
+// Win32_LogicalDisk 的 DriveType：2=可移动 3=本地固定 4=网络 5=光驱 6=内存盘
+function normalizeDriveList(rows) {
+  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  const known = new Set();
+  const drives = [];
+  for (const x of list) {
+    const letter = String((x && (x.DeviceID || x.letter)) || '').charAt(0).toUpperCase();
+    if (!/^[A-Z]$/.test(letter)) continue;
+    known.add(letter);
+    const type = Number(x && x.DriveType);
+    if (type !== 2 && type !== 3) continue; // 网络盘 / 光驱 / 内存盘不参与本地清理
+    const total = Number((x && x.Size) || 0);
+    if (!(total > 0)) continue; // 读卡器等没有媒体的盘符
+    drives.push(
+      makeDrive(letter, {
+        total,
+        free: Number((x && x.FreeSpace) || 0),
+        label: x && x.VolumeName,
+        removable: type === 2,
+      })
+    );
+  }
+  // WMI 没报告、但系统里确实挂载着的盘符，用文件系统探测补齐
+  for (const d of probeMountedDrives()) {
+    if (known.has(d.letter)) continue;
+    if (drives.some((x) => x.letter === d.letter)) continue;
+    drives.push(d);
+  }
+  if (!drives.some((d) => d.letter === SYSTEM_DRIVE)) drives.push(makeDrive(SYSTEM_DRIVE));
+  return sortDrives(drives);
 }
 
 function listDrives(force = false) {
@@ -313,10 +356,19 @@ function listDrives(force = false) {
     return Promise.resolve(driveListCache.value);
   }
   return new Promise((resolve) => {
+    const finish = (rows) => {
+      let value;
+      try {
+        value = normalizeDriveList(rows);
+      } catch (_) {
+        value = [];
+      }
+      if (!value.length) value = driveListCache.value || [];
+      driveListCache = { at: Date.now(), value };
+      resolve(value);
+    };
     if (!IS_WIN) {
-      const fallback = [{ letter: 'C', root: 'C:\\', label: '', total: 0, used: 0, free: 0, removable: false, system: true }];
-      driveListCache = { at: now, value: fallback };
-      resolve(fallback);
+      finish([]);
       return;
     }
     execFile(
@@ -324,22 +376,18 @@ function listDrives(force = false) {
       [
         '-NoProfile',
         '-Command',
-        "Get-CimInstance Win32_LogicalDisk | Where-Object { $_.DriveType -in 2,3 } | Select-Object DeviceID,VolumeName,Size,FreeSpace,DriveType | ConvertTo-Json -Compress",
+        'Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,VolumeName,Size,FreeSpace,DriveType | ConvertTo-Json -Compress',
       ],
       { timeout: 15000, windowsHide: true },
       (err, stdout) => {
         if (err) {
-          resolve(driveListCache.value || normalizeDriveList([]));
+          finish([]); // PowerShell / WMI 不可用 → 走盘符探测
           return;
         }
         try {
-          let j = JSON.parse(String(stdout).trim() || '[]');
-          if (!Array.isArray(j)) j = j ? [j] : [];
-          const value = normalizeDriveList(j);
-          driveListCache = { at: Date.now(), value };
-          resolve(value);
+          finish(JSON.parse(String(stdout).trim() || '[]'));
         } catch (_) {
-          resolve(driveListCache.value || normalizeDriveList([]));
+          finish([]);
         }
       }
     );
@@ -1146,7 +1194,14 @@ async function handleApi(req, res, urlObj) {
 
   if (route === '/api/drives') {
     const drives = await listDrives(true);
-    json(res, 200, { drives, systemDrive: SYSTEM_DRIVE, current: driveFromParam(urlObj.searchParams.get('drive')) });
+    const current = driveFromParam(urlObj.searchParams.get('drive'));
+    json(res, 200, {
+      drives,
+      count: drives.length,
+      systemDrive: SYSTEM_DRIVE,
+      current: drives.some((d) => d.letter === current) ? current : drives[0].letter,
+      detectedAt: new Date().toISOString(),
+    });
     return;
   }
 

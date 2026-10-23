@@ -13,9 +13,11 @@
       .replace(/'/g, '&#39;');
 
   const state = {
-    drive: 'C',
+    drive: '',
+    systemDrive: '',
     drives: [],
-    path: 'C:\\',
+    drivesSignature: '',
+    path: '',
     data: null,
     overview: null,
     currentItems: [],
@@ -97,11 +99,12 @@
   }
 
   function driveOf(p) {
-    return String(p || state.drive || 'C').charAt(0).toUpperCase();
+    return String(p || state.drive || state.systemDrive || '').charAt(0).toUpperCase();
   }
 
   function driveRoot(letter) {
-    return String(letter || state.drive || 'C').toUpperCase() + ':\\';
+    const L = String(letter || state.drive || state.systemDrive || '').charAt(0).toUpperCase();
+    return L ? L + ':\\' : '';
   }
 
   function driveInfo(letter) {
@@ -250,24 +253,58 @@
   }
 
   // ---------- 数据加载 ----------
-  async function loadDrives() {
+  function pickDefaultDrive() {
+    const drives = state.drives || [];
+    const d = drives.find((x) => x.letter === state.systemDrive) || drives.find((x) => x.system) || drives[0];
+    return d ? d.letter : state.systemDrive;
+  }
+
+  function drivesSignature(drives) {
+    return (drives || [])
+      .map((d) => d.letter + ':' + d.total + ':' + Math.round(Number(d.free || 0) / 104857600))
+      .join('|');
+  }
+
+  async function loadDrives(options) {
+    const opts = options || {};
+    let r;
     try {
-      const r = await api('/api/drives');
-      state.drives = r.drives || [];
-      if (!state.drives.some((d) => d.letter === state.drive)) {
-        state.drive = (state.drives.find((d) => d.system) || state.drives[0] || { letter: 'C' }).letter;
-      }
-      renderDrivePicker();
-      return true;
+      r = await api('/api/drives');
     } catch (e) {
-      toast('无法读取磁盘列表', e.message, 'error');
+      if (!opts.silent) toast('无法读取磁盘列表', e.message, 'error');
       return false;
     }
+    const drives = r.drives || [];
+    const systemLetter = String(r.systemDrive || '').charAt(0).toUpperCase();
+    if (systemLetter) state.systemDrive = systemLetter;
+    const previous = state.drive;
+    state.drives = drives;
+    const signature = drivesSignature(drives);
+    const changed = signature !== state.drivesSignature;
+    state.drivesSignature = signature;
+
+    // 之前选中的磁盘已从本机移除（例如拔掉 U 盘）：自动切回实际存在的磁盘
+    if (previous && !drives.some((d) => d.letter === previous)) {
+      const target = pickDefaultDrive();
+      renderDrivePicker();
+      if (target) {
+        toast('磁盘已移除', previous + ': 盘已不在本机，已切换到 ' + target + ' 盘', 'info');
+        await switchDrive(target);
+      }
+      return true;
+    }
+
+    if (!previous || !drives.some((d) => d.letter === previous)) {
+      state.drive = pickDefaultDrive();
+      state.path = driveRoot(state.drive);
+    }
+    if (changed || opts.force) renderDrivePicker();
+    return true;
   }
 
   async function switchDrive(letter) {
-    const next = String(letter || 'C').toUpperCase();
-    if (next === state.drive) return;
+    const next = String(letter || state.systemDrive || '').charAt(0).toUpperCase();
+    if (!next || next === state.drive) return;
     state.drive = next;
     state.path = driveRoot(next);
     state.data = null;
@@ -295,24 +332,77 @@
     schedulePoll(500);
   }
 
+  function driveShortName(d) {
+    if (d.label) return d.label;
+    if (d.system) return '系统盘';
+    if (d.removable) return '可移动盘';
+    return '本地磁盘';
+  }
+
   function renderDrivePicker() {
-    const select = $('#driveSelect');
-    if (!select) return;
-    select.innerHTML = (state.drives || [])
+    const tabs = $('#driveTabs');
+    if (!tabs) return;
+    tabs.innerHTML = (state.drives || [])
       .map(
         (d) =>
-          '<option value="' +
+          '<button type="button" class="drive-tab' +
+          (d.letter === state.drive ? ' active' : '') +
+          '" data-drive="' +
           escapeHtml(d.letter) +
-          '"' +
-          (d.letter === state.drive ? ' selected' : '') +
-          '>' +
-          escapeHtml(d.letter + ': ' + (d.label || (d.system ? '系统盘' : d.removable ? '可移动盘' : '本地磁盘')) + ' · ' + fmtBytes(d.free) + ' 可用') +
-          '</option>'
+          '" role="tab" aria-selected="' +
+          (d.letter === state.drive ? 'true' : 'false') +
+          '" title="' +
+          escapeHtml(d.letter + ': ' + driveShortName(d) + ' · 剩余 ' + fmtBytes(d.free)) +
+          '"><span class="dt-letter">' +
+          escapeHtml(d.letter) +
+          '</span><span class="dt-meta"><span class="dt-name">' +
+          escapeHtml(driveShortName(d)) +
+          '</span><span class="dt-free">' +
+          escapeHtml(fmtBytes(d.free) + ' 可用') +
+          '</span></span></button>'
       )
       .join('');
-    select.value = state.drive;
+    tabs.querySelectorAll('.drive-tab').forEach((button) => {
+      button.addEventListener('click', () => switchDrive(button.getAttribute('data-drive')));
+    });
+    const count = $('#driveCount');
+    if (count) {
+      const list = state.drives || [];
+      count.textContent = list.length ? '本机 ' + list.length + ' 个磁盘' : '正在识别磁盘…';
+      count.title = list.length
+        ? '已自动识别：' + list.map((d) => d.letter + ':').join(' ') + '（盘符由本机系统实际分配，插拔磁盘后点右侧刷新）'
+        : '正在读取本机磁盘列表';
+    }
     const searchInput = $('#searchInput');
-    if (searchInput) searchInput.placeholder = '搜索整个 ' + state.drive + ' 盘，例如 .cache、node_modules';
+    if (searchInput) {
+      searchInput.placeholder = state.drive
+        ? '搜索整个 ' + state.drive + ' 盘，例如 .cache、node_modules'
+        : '搜索磁盘，例如 .cache、node_modules';
+    }
+  }
+
+  function bindDriveRefresh() {
+    const btn = $('#driveRefresh');
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.classList.add('spinning');
+        const ok = await loadDrives({ force: true });
+        if (ok) {
+          const list = state.drives || [];
+          toast('已重新识别本机磁盘', '共 ' + list.length + ' 个：' + list.map((d) => d.letter + ':').join(' '), 'success');
+          await loadOverview();
+        }
+        btn.disabled = false;
+        setTimeout(() => btn.classList.remove('spinning'), 500);
+      });
+    }
+    // 每 60 秒静默重新识别一次，插入 U 盘 / 移动硬盘后无需重启应用
+    setInterval(async () => {
+      const before = state.drivesSignature;
+      const ok = await loadDrives({ silent: true });
+      if (ok && state.drivesSignature !== before && state.drive) await loadOverview();
+    }, 60000);
   }
 
   async function loadOverview() {
@@ -2232,10 +2322,10 @@
 
   async function init() {
     applyNestingPref();
+    bindDriveRefresh();
     const ro = new ResizeObserver(() => resizeCanvas());
     ro.observe(holder);
     resizeCanvas();
-    $('#driveSelect').addEventListener('change', (e) => switchDrive(e.target.value));
     await loadDrives();
     await loadOverview();
     if (!state.data) {

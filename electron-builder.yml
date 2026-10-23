@@ -1,4 +1,4 @@
-appId: com.dreamchaserstrive.cdrivecleaner
+appId: com.dreamchaserstrive.drivecleaner
 productName: 磁盘空间清理
 copyright: Copyright © 2026 DreamChaser-strive
 asar: false
@@ -28,4 +28,4 @@ win:
   requestedExecutionLevel: asInvoker
 
 portable:
-  artifactName: CDriveCleaner-${version}-portable.${ext}
+  artifactName: DriveCleaner-${version}-portable.${ext}

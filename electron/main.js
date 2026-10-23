@@ -7,12 +7,30 @@ const http = require('http');
 const net = require('net');
 const { spawn, spawnSync } = require('child_process');
 
-const APP_ID = 'com.dreamchaserstrive.cdrivecleaner';
-const APP_NAME = 'CDriveCleaner';
+const APP_ID = 'com.dreamchaserstrive.drivecleaner';
+const APP_NAME = 'DriveCleaner';
+const LEGACY_APP_NAME = 'CDriveCleaner';
+
+function migrateLegacyData() {
+  try {
+    const newDataDir = path.join(app.getPath('appData'), APP_NAME, 'data');
+    const legacyDataDir = path.join(app.getPath('appData'), LEGACY_APP_NAME, 'data');
+    if (fs.existsSync(newDataDir) && fs.readdirSync(newDataDir).length) return;
+    if (!fs.existsSync(legacyDataDir)) return;
+    fs.mkdirSync(newDataDir, { recursive: true });
+    for (const name of fs.readdirSync(legacyDataDir)) {
+      if (!/^(scan|progress)(\.[A-Z])?\.json$/.test(name)) continue;
+      fs.copyFileSync(path.join(legacyDataDir, name), path.join(newDataDir, name));
+    }
+  } catch (_) {
+    // 迁移失败时继续使用新目录，最多重新扫描一次，不影响数据安全。
+  }
+}
 
 app.setName(APP_NAME);
 app.setAppUserModelId(APP_ID);
 app.setPath('userData', path.join(app.getPath('appData'), APP_NAME));
+migrateLegacyData();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -122,7 +140,7 @@ if (!gotSingleInstanceLock) {
       if (quitting) return;
       quitting = true;
       dialog.showErrorBox(
-        'C 盘空间清理无法继续运行',
+        '磁盘空间清理无法继续运行',
         `后台服务已退出（代码 ${code ?? '未知'}，信号 ${signal ?? '无'}）。\n\n日志文件：\n${backendLogPath()}`
       );
       app.quit();
@@ -240,7 +258,7 @@ if (!gotSingleInstanceLock) {
       quitting = true;
       stopBackend();
       dialog.showErrorBox(
-        'C 盘空间清理启动失败',
+        '磁盘空间清理启动失败',
         `${err && err.message ? err.message : String(err)}\n\n日志文件：\n${backendLogPath()}`
       );
       app.quit();

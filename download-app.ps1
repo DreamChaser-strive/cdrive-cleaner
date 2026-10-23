@@ -2,11 +2,11 @@ $ErrorActionPreference = 'Stop'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-$repo = 'DreamChaser-strive/cdrive-cleaner'
+$repo = 'DreamChaser-strive/drive-cleaner'
 $api = "https://api.github.com/repos/$repo/releases/latest"
 $headers = @{
   Accept    = 'application/vnd.github+json'
-  'User-Agent' = 'CDriveCleaner-Downloader'
+  'User-Agent' = 'DriveCleaner-Downloader'
 }
 
 Write-Host 'Looking for the latest Windows portable app...'
@@ -21,7 +21,7 @@ $outDir = (Get-Location).Path
 $outFile = Join-Path $outDir $asset.name
 
 Write-Host "Downloading $($asset.name)..."
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $outFile -Headers @{ 'User-Agent' = 'CDriveCleaner-Downloader' }
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $outFile -Headers @{ 'User-Agent' = 'DriveCleaner-Downloader' }
 
 Write-Host ''
 Write-Host "Saved to: $outFile"

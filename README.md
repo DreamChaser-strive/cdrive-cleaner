@@ -1,6 +1,6 @@
-# C 盘空间清理
+# 磁盘空间清理
 
-一个在本机运行的 Windows C 盘空间可视化分析与清理工具。用方块图直接看谁在占用空间，逐层点开查看目录明细，并在同一个界面里把不需要的内容移入回收站或永久删除。
+一个在本机运行的 Windows 磁盘空间可视化分析与清理工具。可识别本机 C、D、E 等磁盘并切换分析对象，用方块图直接看谁在占用空间，逐层点开查看目录明细，并在同一个界面里把不需要的内容移入回收站或永久删除。
 
 桌面版是独立的 Windows 应用，带原生窗口，不需要安装 Node.js；浏览器版仍可从源码运行。
 
@@ -8,29 +8,30 @@
 
 ## 下载桌面应用（推荐）
 
-直接下载应用文件：**[CDriveCleaner-1.1.1-portable.exe](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/download/v1.1.1/CDriveCleaner-1.1.1-portable.exe)**
+直接下载应用文件：**[CDriveCleaner-1.2.0-portable.exe](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/download/v1.2.0/CDriveCleaner-1.2.0-portable.exe)**
 
 也可以进入 **[Releases 页面](https://github.com/DreamChaser-strive/cdrive-cleaner/releases/latest)** 下载最新版。
 
-> 请不要下载页面底部的 `Source code (zip)`，那只是源码压缩包，不包含应用程序。应用文件必须以 `.exe` 结尾，文件名类似 `CDriveCleaner-1.1.1-portable.exe`。
+> 请不要下载页面底部的 `Source code (zip)`，那只是源码压缩包，不包含应用程序。应用文件必须以 `.exe` 结尾，文件名类似 `CDriveCleaner-1.2.0-portable.exe`。
 
 如果你已经下载了源码 ZIP，解压后双击 **`download-app.bat`**，脚本会从 Releases 自动下载最新 exe 到当前目录。
 
 双击 exe 即可运行，无需安装 Node.js，也无需打开命令行。
 
-- 首次启动会自动扫描 C 盘，通常需要约 1 分钟，界面会显示进度。
-- 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，仅在本机使用。
+- 首次启动会自动扫描系统盘，通常需要约 1 分钟；切换到其他磁盘后点击「重新扫描」即可分析该盘。
+- 扫描数据保存在 `%APPDATA%\CDriveCleaner\data`，每个盘符单独保存，仅在本机使用。
 - 应用未做代码签名，Windows SmartScreen 可能提示「Windows 已保护你的电脑」。点击「更多信息」→「仍要运行」即可。
 - 便携版可以放在任意文件夹；右键 exe →「发送到」→「桌面快捷方式」即可固定到桌面。
 
 ## 功能
 
+- **多磁盘切换**：自动识别本机固定磁盘和可移动磁盘，可在 C、D、E 等盘之间切换。
 - **方块空间图**：按文件大小绘制可交互的 treemap，单击选中、双击进入目录。
 - **实时扫描**：重新扫描时方块和容量条会随着已发现的文件持续变化，不必等扫描结束。
 - **目录明细**：查看子目录和文件大小，支持按大小排序、搜索和路径跳转。
-- **清理建议**：区分「推荐清理」「谨慎清理」「系统项目」，避免误删关键数据。
+- **清理建议**：系统盘区分「推荐清理」「谨慎清理」「系统项目」；其他磁盘展示大目录快捷入口。
 - **两种删除方式**：默认移入回收站；永久删除需要二次勾选确认。
-- **安全防护**：仅允许 C 盘路径，系统目录、用户主目录、程序目录和工具自身目录会被拒绝。
+- **安全防护**：禁止删除磁盘根目录；系统盘保护 Windows、Program Files、ProgramData、用户主目录等；所有磁盘均保护回收站和系统保留区域。
 - **本地服务**：随机请求令牌 + 仅本机访问，不依赖云端。
 - **桌面封装**：Electron 原生窗口、单实例运行，关闭窗口即退出后台服务。
 
@@ -65,6 +66,7 @@ npm run build:win
 
 ## 使用说明
 
+- 顶部磁盘下拉框选择 C、D、E 等磁盘；切换后会自动读取该盘已有扫描结果，没有结果时可点击「重新扫描」。
 - **单击**方块：在右侧查看该目录或文件的详细信息。
 - **双击**方块或点击行尾箭头：进入该目录。
 - 勾选列表中的项目可批量删除；顶部「清理建议」可以快速选中常见缓存。
@@ -81,6 +83,7 @@ npm run build:win
 
 - 桌面版数据目录：`%APPDATA%\CDriveCleaner\data`
 - 源码运行数据目录：项目下的 `data/`
+- 系统盘使用 `scan.json`、`progress.json`；其他磁盘使用 `scan.D.json`、`progress.D.json` 等独立文件。
 - 扫描结果包含本机真实目录路径，已加入 `.gitignore`，不会提交，也不会打包进 exe。
 - 界面的所有请求只在 `127.0.0.1` 上处理。
 
@@ -91,7 +94,7 @@ cdrive-cleaner/
 ├─ electron/main.js           # 桌面应用入口（窗口、后台服务生命周期）
 ├─ public/                    # 前端界面（Canvas treemap + 列表）
 ├─ build/                     # 应用图标
-├─ scan.js                    # C 盘扫描器
+├─ scan.js                    # 磁盘空间扫描器（按 CDRIVE_ROOT 选择盘符）
 ├─ server.js                  # 本地 HTTP 服务与删除 API
 ├─ recycle.ps1                # 调用 Windows 回收站 API
 ├─ electron-builder.yml       # Windows 打包配置
@@ -105,7 +108,7 @@ cdrive-cleaner/
 
 ## 已知限制
 
-- 只支持 Windows x64，且目前只扫描 C 盘。
+- 只支持 Windows x64，可分析本机固定磁盘和可移动磁盘。
 - 显示的是文件逻辑大小，与资源管理器或磁盘占用可能略有差异。
 - 扫描会跳过符号链接和 junction，避免重复计算与死循环。
 - 部分受系统保护的位置可能无法读取，错误会被跳过，不影响其余结果。

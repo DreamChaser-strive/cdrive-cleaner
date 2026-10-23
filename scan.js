@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
- * C 盘空间扫描器
- * 输出 data/scan.json + data/progress.json
+ * 磁盘空间扫描器
+ * 输出 data/scan.json + data/progress.json（系统盘）或 data/scan.X.json（其他盘）
  * 仅统计文件逻辑大小，跳过符号链接/junction，避免重复计算与死循环。
  */
 'use strict';
@@ -10,15 +10,19 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 
-const ROOT = 'C:\\';
+const SYSTEM_DRIVE = String(process.env.SystemDrive || 'C:').replace(/:/g, '').toUpperCase() || 'C';
+let ROOT = path.win32.normalize((process.env.CDRIVE_ROOT || SYSTEM_DRIVE + ':\\').trim());
+if (/^[A-Za-z]:$/.test(ROOT)) ROOT += '\\';
+const DRIVE = ROOT.charAt(0).toUpperCase();
+const SUFFIX = DRIVE === SYSTEM_DRIVE ? '' : '.' + DRIVE;
 const OUT_DIR = process.env.CDRIVE_DATA_DIR
   ? path.resolve(process.env.CDRIVE_DATA_DIR)
   : path.join(__dirname, 'data');
-const OUT_FILE = path.join(OUT_DIR, 'scan.json');
-const PROGRESS_FILE = path.join(OUT_DIR, 'progress.json');
-const TMP_FILE = path.join(OUT_DIR, 'scan.json.tmp');
-const LIVE_FILE = path.join(OUT_DIR, 'scan.live.json');
-const LIVE_TMP_FILE = path.join(OUT_DIR, 'scan.live.json.tmp');
+const OUT_FILE = path.join(OUT_DIR, `scan${SUFFIX}.json`);
+const PROGRESS_FILE = path.join(OUT_DIR, `progress${SUFFIX}.json`);
+const TMP_FILE = path.join(OUT_DIR, `scan${SUFFIX}.json.tmp`);
+const LIVE_FILE = path.join(OUT_DIR, `scan.live${SUFFIX}.json`);
+const LIVE_TMP_FILE = path.join(OUT_DIR, `scan.live${SUFFIX}.json.tmp`);
 const WORKERS = 32;
 const FILE_CHUNK = 64;
 const STORE_MIN_SIZE = 256 * 1024; // 仅缓存 >= 256KB 的目录
@@ -26,7 +30,7 @@ const LIVE_MIN_SIZE = 4 * 1024 * 1024; // 扫描过程中只展示 >= 4MB 的目
 const LIVE_FLUSH_INTERVAL = 1500;
 const MAX_CHILDREN = 300;
 const SKIP_NAMES = new Set(['system volume information']);
-const SKIP_ROOT_PATHS = new Set(['c:\\documents and settings']);
+const SKIP_ROOT_PATHS = new Set([SYSTEM_DRIVE.toLowerCase() + ':\\documents and settings']);
 
 const startedAtMs = Date.now();
 const state = {

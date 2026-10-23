@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>C 盘空间清理 · C: Drive Analyzer</title>
+<title>磁盘空间清理 · Drive Analyzer</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -39,14 +39,19 @@
   <div class="brand">
     <div class="brand-mark"><svg><use href="#i-drive"/></svg></div>
     <div class="brand-text">
-      <h1>C 盘空间清理</h1>
-      <p>点选方块查看占用 · 双击进入目录</p>
+      <h1>磁盘空间清理</h1>
+      <p>选择磁盘 · 点选方块查看占用 · 双击进入目录</p>
     </div>
   </div>
 
+  <label class="drive-picker" title="选择要分析的磁盘">
+    <svg><use href="#i-drive"/></svg>
+    <select id="driveSelect" aria-label="选择磁盘"></select>
+  </label>
+
   <div class="capacity" id="capacity">
     <div class="cap-head">
-      <span class="cap-title"><svg><use href="#i-drive"/></svg> Windows (C:)</span>
+      <span class="cap-title" id="capTitle"><svg><use href="#i-drive"/></svg> Windows (C:)</span>
       <span class="cap-stats" id="capStats">正在读取磁盘容量…</span>
     </div>
     <div class="cap-bar" id="capBar">
@@ -80,7 +85,7 @@
   </button>
   <div class="search-wrap" id="searchWrap">
     <svg class="search-icon"><use href="#i-search"/></svg>
-    <input id="searchInput" type="text" autocomplete="off" spellcheck="false" placeholder="搜索整个 C 盘，例如 .cache、node_modules" />
+    <input id="searchInput" type="text" autocomplete="off" spellcheck="false" placeholder="搜索磁盘，例如 .cache、node_modules" />
     <kbd>Enter</kbd>
     <div class="search-dropdown hidden" id="searchDropdown"></div>
   </div>
@@ -203,7 +208,7 @@
       <div class="help-grid">
         <div><b>看空间</b><p>方块面积 = 占用大小。单击选中，右侧查看该目录/文件详情；双击目录进入下一层。面包屑可快速返回。</p></div>
         <div><b>找大件</b><p>当前目录内容按大小排序；勾选可批量操作。顶部搜索支持全盘目录名或路径片段。</p></div>
-        <div><b>清理</b><p>“移到回收站”可恢复，但不会立即释放 C 盘空间；清空回收站后才会释放。“永久删除”立即释放且不可恢复。</p></div>
+        <div><b>清理</b><p>“移到回收站”可恢复，但不会立即释放磁盘空间；清空回收站后才会释放。“永久删除”立即释放且不可恢复。</p></div>
         <div><b>保护</b><p>Windows、Program Files、系统关键文件、个人主目录等已锁定，工具会阻止误删；系统区域会标注为不可直接清理。</p></div>
       </div>
       <div class="notice"><svg><use href="#i-info"/></svg><span>建议清理顺序：先看“清理建议”里的安全缓存 → 再检查用户目录中的大文件夹 → 最后处理回收站 / 休眠文件。删除前请确认文件夹用途。</span></div>

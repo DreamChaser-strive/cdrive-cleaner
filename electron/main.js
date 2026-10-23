@@ -174,7 +174,7 @@ if (!gotSingleInstanceLock) {
       center: true,
       show: false,
       backgroundColor: '#f8f3ea',
-      title: 'C 盘空间清理',
+      title: '磁盘空间清理',
       icon: path.join(__dirname, '..', 'build', 'icon.png'),
       autoHideMenuBar: true,
       webPreferences: {

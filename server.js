@@ -14,10 +14,6 @@ const PUBLIC_DIR = path.join(APP_DIR, 'public');
 const DATA_DIR = process.env.CDRIVE_DATA_DIR
   ? path.resolve(process.env.CDRIVE_DATA_DIR)
   : path.join(APP_DIR, 'data');
-const SCAN_FILE = path.join(DATA_DIR, 'scan.json');
-const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
-const LIVE_FILE = path.join(DATA_DIR, 'scan.live.json');
-const RENAME_FILE = path.join(DATA_DIR, 'scan.json.tmp');
 const RECYCLE_PS1 = path.join(APP_DIR, 'recycle.ps1');
 const PORT = Number(process.env.PORT || 17878);
 const TOKEN = crypto.randomBytes(24).toString('hex');
@@ -29,52 +25,48 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 const HOME = process.env.USERPROFILE || os.homedir();
 const LOCAL = process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local');
 const ROAMING = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
+const SYSTEM_DRIVE = String(process.env.SystemDrive || 'C:')
+  .replace(/:/g, '')
+  .toUpperCase() || 'C';
 
-const BLOCKED_EXACT = new Set(
-  [
-    'c:\\',
-    'c:\\windows',
-    'c:\\program files',
-    'c:\\program files (x86)',
-    'c:\\programdata',
-    'c:\\recovery',
-    'c:\\$recycle.bin',
-    'c:\\krecycle',
-    'c:\\system volume information',
-    'c:\\boot',
-    'c:\\efi',
-    'c:\\users',
-    path.join(HOME).toLowerCase(),
-    path.join(HOME, 'Desktop').toLowerCase(),
-    path.join(HOME, 'Documents').toLowerCase(),
-    path.join(HOME, 'Downloads').toLowerCase(),
-    path.join(HOME, 'Pictures').toLowerCase(),
-    path.join(HOME, 'Videos').toLowerCase(),
-    path.join(HOME, 'Music').toLowerCase(),
-    path.join(HOME, 'OneDrive').toLowerCase(),
-    path.join(HOME, 'AppData').toLowerCase(),
-    path.join(HOME, 'AppData', 'Local').toLowerCase(),
-    path.join(HOME, 'AppData', 'LocalLow').toLowerCase(),
-    path.join(HOME, 'AppData', 'Roaming').toLowerCase(),
-    path.join(HOME, '.ssh').toLowerCase(),
-    path.join(HOME, '.gnupg').toLowerCase(),
-    path.join(HOME, '..', 'Public').toLowerCase(),
-    APP_DIR.toLowerCase(),
-    DATA_DIR.toLowerCase(),
-  ].map((x) => x.replace(/\\+$/, '').toLowerCase())
-);
-const BLOCKED_PREFIXES = [
-  'c:\\windows',
-  'c:\\program files',
-  'c:\\program files (x86)',
-  'c:\\programdata',
-  'c:\\recovery',
-  'c:\\$recycle.bin',
-  'c:\\krecycle',
-  'c:\\system volume information',
-  'c:\\boot',
-  'c:\\efi',
+function driveFiles(letter) {
+  const suffix = letter === SYSTEM_DRIVE ? '' : '.' + letter;
+  return {
+    scan: path.join(DATA_DIR, `scan${suffix}.json`),
+    progress: path.join(DATA_DIR, `progress${suffix}.json`),
+    live: path.join(DATA_DIR, `scan.live${suffix}.json`),
+    tmp: path.join(DATA_DIR, `scan${suffix}.json.tmp`),
+    liveTmp: path.join(DATA_DIR, `scan.live${suffix}.json.tmp`),
+  };
+}
+
+const USER_PROTECTED = [
+  path.join(HOME).toLowerCase(),
+  path.join(HOME, 'Desktop').toLowerCase(),
+  path.join(HOME, 'Documents').toLowerCase(),
+  path.join(HOME, 'Downloads').toLowerCase(),
+  path.join(HOME, 'Pictures').toLowerCase(),
+  path.join(HOME, 'Videos').toLowerCase(),
+  path.join(HOME, 'Music').toLowerCase(),
+  path.join(HOME, 'OneDrive').toLowerCase(),
+  path.join(HOME, 'AppData').toLowerCase(),
+  path.join(HOME, 'AppData', 'Local').toLowerCase(),
+  path.join(HOME, 'AppData', 'LocalLow').toLowerCase(),
+  path.join(HOME, 'AppData', 'Roaming').toLowerCase(),
+  path.join(HOME, '.ssh').toLowerCase(),
+  path.join(HOME, '.gnupg').toLowerCase(),
+  path.join(HOME, '..', 'Public').toLowerCase(),
+].map((x) => x.replace(/\\+$/, '').toLowerCase());
+
+const ALWAYS_BLOCKED_ROOT_NAMES = [
+  '$recycle.bin',
+  'system volume information',
+  'recovery',
+  'boot',
+  'efi',
+  'krecycle',
 ];
+const SYSTEM_BLOCKED_ROOT_NAMES = ['windows', 'program files', 'program files (x86)', 'programdata', 'users'];
 
 function normPath(input) {
   if (typeof input !== 'string' || !input.trim()) return null;
@@ -87,57 +79,97 @@ function normPath(input) {
 function keyOf(p) {
   return p.toLowerCase();
 }
+function driveOf(p) {
+  return String(p || '').charAt(0).toUpperCase();
+}
+function driveRoot(letter) {
+  return letter.toUpperCase() + ':\\';
+}
 function checkDeletable(p) {
   const key = keyOf(p);
-  if (!/^c:\\/.test(key)) return '仅支持清理 C 盘内的项目';
-  if (key === 'c:\\') return '不能删除整个 C 盘';
-  if (BLOCKED_EXACT.has(key)) return '这是系统或用户重要目录，已禁止删除';
-  for (const prefix of BLOCKED_PREFIXES) {
-    if (key === prefix || key.startsWith(prefix + '\\')) {
-      return '系统 / 程序目录受保护，请通过卸载或系统工具清理';
+  const letter = driveOf(key);
+  if (!/^[a-z]:\\/.test(key)) return '路径无效，仅支持本地磁盘';
+  const root = letter.toLowerCase() + ':\\';
+  if (key === root) return `不能删除整个 ${letter} 盘`;
+  if (USER_PROTECTED.includes(key)) return '这是用户重要目录，已禁止删除';
+  if (key === APP_DIR.toLowerCase() || key === DATA_DIR.toLowerCase()) return '清理工具自身目录不可删除';
+
+  for (const name of ALWAYS_BLOCKED_ROOT_NAMES) {
+    const prefix = root + name;
+    if (key === prefix || key.startsWith(prefix + '\\')) return '回收站、启动分区或系统保留区域不可直接删除';
+  }
+  if (letter === SYSTEM_DRIVE) {
+    for (const name of SYSTEM_BLOCKED_ROOT_NAMES) {
+      const prefix = root + name;
+      if (key === prefix || key.startsWith(prefix + '\\')) {
+        return '系统盘的系统 / 程序目录受保护，请通过卸载或系统工具清理';
+      }
     }
   }
+
   const base = path.win32.basename(key);
-  if (['pagefile.sys', 'hiberfil.sys', 'swapfile.sys', 'bootmgr'].includes(base)) {
+  if (letter === SYSTEM_DRIVE && ['pagefile.sys', 'hiberfil.sys', 'swapfile.sys', 'bootmgr'].includes(base)) {
     return '系统关键文件不可删除';
   }
   if (key.startsWith(APP_DIR.toLowerCase() + '\\') || key === APP_DIR.toLowerCase()) {
     return '清理工具自身目录不可删除';
   }
+  if (key.startsWith(DATA_DIR.toLowerCase() + '\\') || key === DATA_DIR.toLowerCase()) {
+    return '清理工具数据目录不可删除';
+  }
   return null;
 }
 
-// ---------- 扫描数据 ----------
-let scan = null;
-let scanMtime = 0;
-let dirsMap = new Map();
+// ---------- 扫描数据（按盘符隔离） ----------
+const driveStates = new Map();
 
-function loadScan(force = false) {
+function stateFor(letter) {
+  const L = String(letter || SYSTEM_DRIVE).toUpperCase();
+  let st = driveStates.get(L);
+  if (!st) {
+    const files = driveFiles(L);
+    st = {
+      letter: L,
+      root: driveRoot(L),
+      files,
+      scan: null,
+      scanMtime: 0,
+      dirsMap: new Map(),
+      live: null,
+      liveMtime: 0,
+      liveMap: new Map(),
+      progressCache: { at: 0, value: null },
+      driveCache: { at: 0, value: null },
+      lockedCache: { at: 0, value: [] },
+      process: null,
+      saveTimer: null,
+    };
+    driveStates.set(L, st);
+  }
+  return st;
+}
+
+function loadScan(st, force = false) {
   try {
-    const st = fs.statSync(SCAN_FILE);
-    if (!force && scan && st.mtimeMs === scanMtime) return true;
-    const raw = fs.readFileSync(SCAN_FILE, 'utf8');
+    const fileStat = fs.statSync(st.files.scan);
+    if (!force && st.scan && fileStat.mtimeMs === st.scanMtime) return true;
+    const raw = fs.readFileSync(st.files.scan, 'utf8');
     const data = JSON.parse(raw);
     if (!data || !data.dirs) return false;
-    scan = data;
-    scanMtime = st.mtimeMs;
-    dirsMap = new Map(Object.entries(scan.dirs));
+    st.scan = data;
+    st.scanMtime = fileStat.mtimeMs;
+    st.dirsMap = new Map(Object.entries(st.scan.dirs));
     return true;
   } catch (_) {
     return false;
   }
 }
-loadScan(true);
 
-let live = null;
-let liveMtime = 0;
-let liveMap = new Map();
-
-function loadLive(force = false) {
+function loadLive(st, force = false) {
   try {
-    const st = fs.statSync(LIVE_FILE);
-    if (!force && live && st.mtimeMs === liveMtime) return true;
-    const data = JSON.parse(fs.readFileSync(LIVE_FILE, 'utf8'));
+    const fileStat = fs.statSync(st.files.live);
+    if (!force && st.live && fileStat.mtimeMs === st.liveMtime) return true;
+    const data = JSON.parse(fs.readFileSync(st.files.live, 'utf8'));
     if (!data || !data.dirs) return false;
     const map = new Map(Object.entries(data.dirs));
     const children = new Map();
@@ -162,24 +194,41 @@ function loadLive(force = false) {
       parentRec.listedChildSize = listed.reduce((s, x) => s + x[1], 0);
       parentRec.omittedChildSize = omitted;
     }
-    live = data;
-    liveMap = map;
-    liveMtime = st.mtimeMs;
+    st.live = data;
+    st.liveMap = map;
+    st.liveMtime = fileStat.mtimeMs;
     return true;
   } catch (_) {
-    live = null;
-    liveMap = new Map();
-    liveMtime = 0;
+    st.live = null;
+    st.liveMap = new Map();
+    st.liveMtime = 0;
     return false;
   }
 }
 
-function isScanning(progress = cachedProgress()) {
+function readProgress(st) {
+  try {
+    const fileStat = fs.statSync(st.files.progress);
+    const p = JSON.parse(fs.readFileSync(st.files.progress, 'utf8'));
+    return { ...p, ageMs: Date.now() - fileStat.mtimeMs };
+  } catch (_) {
+    return null;
+  }
+}
+
+function cachedProgress(st) {
+  if (Date.now() - st.progressCache.at > 500) {
+    st.progressCache = { at: Date.now(), value: readProgress(st) };
+  }
+  return st.progressCache.value;
+}
+
+function isScanning(st, progress = cachedProgress(st)) {
   return !!(progress && progress.phase === 'scanning' && progress.ageMs < 12000);
 }
 
-function liveRecord(key) {
-  const rec = liveMap.get(key);
+function liveRecord(st, key) {
+  const rec = st.liveMap.get(key);
   if (!rec) return null;
   const listed = rec.listedChildSize || 0;
   return {
@@ -195,57 +244,79 @@ function liveRecord(key) {
   };
 }
 
-function cachedRec(p) {
+function cachedRec(st, p) {
   const key = keyOf(p);
-  if (isScanning()) {
-    const lr = liveRecord(key);
+  if (isScanning(st)) {
+    const lr = liveRecord(st, key);
     if (lr) return lr;
   }
-  if (!scan) loadScan();
-  if (!scan) return null;
-  return dirsMap.get(key) || null;
+  if (!st.scan) loadScan(st);
+  if (!st.scan) return null;
+  return st.dirsMap.get(key) || null;
 }
 
-let saveTimer = null;
-function saveScanSoon() {
-  if (!scan) return;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
+function saveScanSoon(st) {
+  if (!st.scan) return;
+  clearTimeout(st.saveTimer);
+  st.saveTimer = setTimeout(() => {
     try {
-      const tmp = RENAME_FILE;
-      fs.writeFileSync(tmp, JSON.stringify(scan));
-      fs.renameSync(tmp, SCAN_FILE);
+      fs.writeFileSync(st.files.tmp, JSON.stringify(st.scan));
+      fs.renameSync(st.files.tmp, st.files.scan);
       try {
-        scanMtime = fs.statSync(SCAN_FILE).mtimeMs;
+        st.scanMtime = fs.statSync(st.files.scan).mtimeMs;
       } catch (_) {}
     } catch (_) {}
   }, 800);
 }
 
-function readProgress() {
-  try {
-    const st = fs.statSync(PROGRESS_FILE);
-    const p = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
-    return { ...p, ageMs: Date.now() - st.mtimeMs };
-  } catch (_) {
-    return null;
+// ---------- 磁盘容量与盘符 ----------
+let driveListCache = { at: 0, value: null };
+
+function normalizeDriveList(rows) {
+  const drives = rows
+    .map((x) => {
+      const letter = String(x.DeviceID || x.letter || '').charAt(0).toUpperCase();
+      if (!/^[A-Z]$/.test(letter)) return null;
+      const total = Number(x.Size || 0);
+      const free = Number(x.FreeSpace || 0);
+      return {
+        letter,
+        root: driveRoot(letter),
+        label: String(x.VolumeName || '').trim(),
+        total,
+        used: Math.max(0, total - free),
+        free,
+        removable: Number(x.DriveType) === 2,
+        system: letter === SYSTEM_DRIVE,
+      };
+    })
+    .filter((x) => x && x.total > 0)
+    .sort((a, b) => (a.system === b.system ? a.letter.localeCompare(b.letter) : a.system ? -1 : 1));
+  if (!drives.some((d) => d.letter === SYSTEM_DRIVE)) {
+    drives.unshift({
+      letter: SYSTEM_DRIVE,
+      root: driveRoot(SYSTEM_DRIVE),
+      label: '',
+      total: 0,
+      used: 0,
+      free: 0,
+      removable: false,
+      system: true,
+    });
   }
+  return drives;
 }
 
-let progressCache = { at: 0, value: null };
-function cachedProgress() {
-  if (Date.now() - progressCache.at > 500) progressCache = { at: Date.now(), value: readProgress() };
-  return progressCache.value;
-}
-
-// ---------- 磁盘容量 ----------
-let driveCache = { at: 0, value: null };
-function getDriveInfo() {
+function listDrives(force = false) {
   const now = Date.now();
-  if (driveCache.value && now - driveCache.at < 20000) return Promise.resolve(driveCache.value);
+  if (!force && driveListCache.value && now - driveListCache.at < 30000) {
+    return Promise.resolve(driveListCache.value);
+  }
   return new Promise((resolve) => {
     if (!IS_WIN) {
-      resolve(null);
+      const fallback = [{ letter: 'C', root: 'C:\\', label: '', total: 0, used: 0, free: 0, removable: false, system: true }];
+      driveListCache = { at: now, value: fallback };
+      resolve(fallback);
       return;
     }
     execFile(
@@ -253,43 +324,55 @@ function getDriveInfo() {
       [
         '-NoProfile',
         '-Command',
-        '$d=Get-PSDrive C; [pscustomobject]@{total=[double]$d.Used+[double]$d.Free;used=[double]$d.Used;free=[double]$d.Free}|ConvertTo-Json -Compress',
+        "Get-CimInstance Win32_LogicalDisk | Where-Object { $_.DriveType -in 2,3 } | Select-Object DeviceID,VolumeName,Size,FreeSpace,DriveType | ConvertTo-Json -Compress",
       ],
       { timeout: 15000, windowsHide: true },
       (err, stdout) => {
         if (err) {
-          resolve(driveCache.value);
+          resolve(driveListCache.value || normalizeDriveList([]));
           return;
         }
         try {
-          const j = JSON.parse(String(stdout).trim());
-          const v = { total: j.total, used: j.used, free: j.free };
-          driveCache = { at: Date.now(), value: v };
-          resolve(v);
+          let j = JSON.parse(String(stdout).trim() || '[]');
+          if (!Array.isArray(j)) j = j ? [j] : [];
+          const value = normalizeDriveList(j);
+          driveListCache = { at: Date.now(), value };
+          resolve(value);
         } catch (_) {
-          resolve(driveCache.value);
+          resolve(driveListCache.value || normalizeDriveList([]));
         }
       }
     );
   });
 }
 
+function getDriveInfo(st) {
+  const now = Date.now();
+  if (st.driveCache.value && now - st.driveCache.at < 20000) return Promise.resolve(st.driveCache.value);
+  return listDrives().then((drives) => {
+    const found = drives.find((d) => d.letter === st.letter);
+    if (!found) return st.driveCache.value;
+    const v = { total: found.total, used: found.used, free: found.free, label: found.label, letter: found.letter };
+    st.driveCache = { at: Date.now(), value: v };
+    return v;
+  });
+}
+
 // 受系统锁定、Node 无法 stat 的根目录大文件（休眠/分页文件等）
-let lockedCache = { at: 0, value: [] };
-function getRootLockedFiles() {
-  if (Date.now() - lockedCache.at < 5 * 60 * 1000) return Promise.resolve(lockedCache.value);
+function getRootLockedFiles(st) {
+  if (Date.now() - st.lockedCache.at < 5 * 60 * 1000) return Promise.resolve(st.lockedCache.value);
   return new Promise((resolve) => {
-    if (!IS_WIN) return resolve([]);
+    if (!IS_WIN || st.letter !== SYSTEM_DRIVE) return resolve([]);
     execFile(
       'powershell.exe',
       [
         '-NoProfile',
         '-Command',
-        "Get-ChildItem -LiteralPath 'C:\\' -Force -File -ErrorAction SilentlyContinue | Where-Object { @('hiberfil.sys','pagefile.sys','swapfile.sys') -contains $_.Name } | Select-Object Name,Length | ConvertTo-Json -Compress",
+        `Get-ChildItem -LiteralPath '${st.root.replace(/'/g, "''")}' -Force -File -ErrorAction SilentlyContinue | Where-Object { @('hiberfil.sys','pagefile.sys','swapfile.sys') -contains $_.Name } | Select-Object Name,Length | ConvertTo-Json -Compress`,
       ],
       { timeout: 15000, windowsHide: true },
       (err, stdout) => {
-        if (err) return resolve(lockedCache.value);
+        if (err) return resolve(st.lockedCache.value);
         try {
           let j = JSON.parse(String(stdout).trim() || '[]');
           if (!Array.isArray(j)) j = j && (j.Name || j.name) ? [j] : [];
@@ -299,10 +382,10 @@ function getRootLockedFiles() {
               size: Number(x.Length != null ? x.Length : x.size),
             }))
             .filter((x) => x.name && x.size > 0);
-          lockedCache = { at: Date.now(), value };
+          st.lockedCache = { at: Date.now(), value };
           resolve(value);
         } catch (_) {
-          resolve(lockedCache.value);
+          resolve(st.lockedCache.value);
         }
       }
     );
@@ -351,13 +434,13 @@ async function measureLimited(target, budgetMs = 2200) {
   return { size, partial };
 }
 
-async function getPathSize(p) {
-  const rec = cachedRec(p);
+async function getPathSize(st, p) {
+  const rec = cachedRec(st, p);
   if (rec) return { size: rec.s, partial: false, cached: true };
   try {
-    const st = await fsp.lstat(p);
-    if (st.isFile()) return { size: st.size, partial: false, cached: false };
-    if (!st.isDirectory()) return { size: 0, partial: false, cached: false };
+    const st2 = await fsp.lstat(p);
+    if (st2.isFile()) return { size: st2.size, partial: false, cached: false };
+    if (!st2.isDirectory()) return { size: 0, partial: false, cached: false };
   } catch (_) {
     return { size: 0, partial: false, cached: false };
   }
@@ -369,9 +452,9 @@ async function getPathSize(p) {
   return value;
 }
 
-async function listDirectory(p, opts = {}) {
+async function listDirectory(st, p, opts = {}) {
   const liveMode = !!opts.live;
-  const rec = cachedRec(p);
+  const rec = cachedRec(st, p);
   let entries;
   try {
     entries = await fsp.readdir(p, { withFileTypes: true });
@@ -393,7 +476,7 @@ async function listDirectory(p, opts = {}) {
   const dirs = [];
   for (const ent of dirEntries) {
     const childPath = path.win32.join(p, ent.name);
-    const childRec = cachedRec(childPath);
+    const childRec = cachedRec(st, childPath);
     let size = childRec ? childRec.s : null;
     if (size == null && rec) {
       const found = (rec.c || []).find((x) => x[0].toLowerCase() === ent.name.toLowerCase());
@@ -403,7 +486,7 @@ async function listDirectory(p, opts = {}) {
       if (liveMode) {
         size = 0;
       } else {
-        const m = await getPathSize(childPath);
+        const m = await getPathSize(st, childPath);
         size = m.size;
       }
     }
@@ -482,8 +565,9 @@ async function listDirectory(p, opts = {}) {
     },
     cached: !!rec,
     live: liveMode,
-    liveMtime: liveMode ? liveMtime : 0,
-    scannedAt: scan ? scan.scannedAt : null,
+    liveMtime: liveMode ? st.liveMtime : 0,
+    drive: st.letter,
+    scannedAt: st.scan ? st.scan.scannedAt : null,
   };
 }
 
@@ -541,13 +625,13 @@ async function validateDeletable(paths) {
   return results;
 }
 
-async function getRemovalSize(p) {
-  const rec = cachedRec(p);
+async function getRemovalSize(st, p) {
+  const rec = cachedRec(st, p);
   if (rec) return rec.s;
   try {
-    const st = await fsp.lstat(p);
-    if (st.isFile()) return st.size;
-    if (st.isDirectory()) {
+    const stat = await fsp.lstat(p);
+    if (stat.isFile()) return stat.size;
+    if (stat.isDirectory()) {
       const m = await measureLimited(p, 1500);
       return m.size;
     }
@@ -555,34 +639,34 @@ async function getRemovalSize(p) {
   return 0;
 }
 
-function wasCachedAtScan(p, isDir) {
-  if (!scan) return false;
+function wasCachedAtScan(st, p, isDir) {
+  if (!st.scan) return false;
   const key = keyOf(p);
-  if (dirsMap.has(key)) return true;
+  if (st.dirsMap.has(key)) return true;
   let parent = path.win32.dirname(p);
   if (parent.length === 2) parent += '\\';
-  const parentRec = dirsMap.get(keyOf(parent));
+  const parentRec = st.dirsMap.get(keyOf(parent));
   if (!parentRec) return false;
   const name = path.win32.basename(p).toLowerCase();
   if (isDir && Array.isArray(parentRec.c)) {
     return parentRec.c.some((x) => String(x[0]).toLowerCase() === name);
   }
   try {
-    const st = fs.lstatSync(p);
-    const scanStart = Date.parse(scan.scannedAt || 0) - (Number(scan.elapsedMs) || 0);
-    return st.ctimeMs <= scanStart + 2000;
+    const stat = fs.lstatSync(p);
+    const scanStart = Date.parse(st.scan.scannedAt || 0) - (Number(st.scan.elapsedMs) || 0);
+    return stat.ctimeMs <= scanStart + 2000;
   } catch (_) {
     return false;
   }
 }
 
-function applyRemoval(p, size, isDir, existedAtScan) {
-  if (!scan) return;
+function applyRemoval(st, p, size, isDir, existedAtScan) {
+  if (!st.scan) return;
   const key = keyOf(p);
   const name = path.win32.basename(p);
   // 删除自身及所有缓存后代
-  for (const k of Array.from(dirsMap.keys())) {
-    if (k === key || k.startsWith(key + '\\')) dirsMap.delete(k);
+  for (const k of Array.from(st.dirsMap.keys())) {
+    if (k === key || k.startsWith(key + '\\')) st.dirsMap.delete(k);
   }
   if (!existedAtScan) {
     // 扫描之后新建的文件/目录不在快照中，祖先缓存无需扣减
@@ -593,7 +677,7 @@ function applyRemoval(p, size, isDir, existedAtScan) {
   let parent = path.win32.dirname(p);
   if (parent.length === 2) parent += '\\';
   const parentKey = keyOf(parent);
-  const parentRec = dirsMap.get(parentKey);
+  const parentRec = st.dirsMap.get(parentKey);
   if (parentRec) {
     let removedFromC = false;
     if (Array.isArray(parentRec.c)) {
@@ -614,18 +698,18 @@ function applyRemoval(p, size, isDir, existedAtScan) {
   let ancestor = path.win32.dirname(p);
   if (ancestor.length === 2) ancestor += '\\';
   for (let guard = 0; guard < 200; guard++) {
-    const rec = dirsMap.get(keyOf(ancestor));
+    const rec = st.dirsMap.get(keyOf(ancestor));
     if (rec) rec.s = Math.max(0, rec.s - size);
-    if (keyOf(ancestor) === 'c:\\') break;
+    if (keyOf(ancestor) === st.root.toLowerCase()) break;
     const next = path.win32.dirname(ancestor);
     if (!next || next === ancestor) break;
     ancestor = next;
     if (ancestor.length === 2) ancestor += '\\';
   }
-  if (scan && scan.stats) scan.stats.bytes = Math.max(0, (scan.stats.bytes || 0) - size);
+  if (st.scan && st.scan.stats) st.scan.stats.bytes = Math.max(0, (st.scan.stats.bytes || 0) - size);
   suggestionSizeCache.clear();
-  scan.modifiedAt = new Date().toISOString();
-  saveScanSoon();
+  st.scan.modifiedAt = new Date().toISOString();
+  saveScanSoon(st);
 }
 
 function runRecycle(paths) {
@@ -681,7 +765,7 @@ async function permanentDelete(p, isDir) {
 // ---------- 清理建议 ----------
 const suggestionSizeCache = new Map();
 
-async function sizeForSuggestion(paths) {
+async function sizeForSuggestion(st, paths) {
   let size = 0;
   let partial = false;
   let existing = 0;
@@ -700,7 +784,7 @@ async function sizeForSuggestion(paths) {
       suggestionSizeCache.set(key, { at: Date.now(), size: 0, partial: false });
       continue;
     }
-    const m = await getPathSize(p);
+    const m = await getPathSize(st, p);
     suggestionSizeCache.set(key, { at: Date.now(), size: m.size, partial: m.partial });
     size += m.size;
     partial = partial || m.partial;
@@ -713,186 +797,188 @@ function joinPath(base, ...parts) {
   return path.win32.join(base, ...parts);
 }
 
-async function buildSuggestions() {
+async function buildSuggestions(st) {
+  const root = st.root;
   const raw = [];
   const add = (def) => raw.push(def);
 
-  add({
-    id: 'user-temp',
-    label: '用户临时文件',
-    group: 'safe',
-    risk: 'safe',
-    paths: [joinPath(LOCAL, 'Temp')],
-    note: '各类程序产生的临时文件。正在使用的文件可能跳过，建议关闭浏览器和大型软件后清理。',
-  });
-  add({
-    id: 'win-temp',
-    label: 'Windows 临时文件',
-    group: 'safe',
-    risk: 'safe',
-    paths: [joinPath('C:\\Windows', 'Temp')],
-    note: '系统临时文件，可安全删除；被占用的文件会自动跳过。',
-  });
-  add({
-    id: 'crash-dumps',
-    label: '崩溃转储',
-    group: 'safe',
-    risk: 'safe',
-    paths: [joinPath(LOCAL, 'CrashDumps'), joinPath(LOCAL, 'Microsoft', 'Windows', 'WER')],
-    note: '程序崩溃时生成的转储文件，通常可以安全清理。',
-  });
-  add({
-    id: 'chrome-cache',
-    label: 'Chrome 浏览器缓存',
-    group: 'safe',
-    risk: 'safe',
-    paths: [
-      joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Cache'),
-      joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Code Cache'),
-      joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'GPUCache'),
-      joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'ShaderCache'),
-      joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'GrShaderCache'),
-      joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Service Worker', 'CacheStorage'),
-    ],
-    note: '只清理网页缓存，不会删除书签、密码和登录状态。建议先关闭 Chrome。',
-  });
-  add({
-    id: 'edge-cache',
-    label: 'Edge 浏览器缓存',
-    group: 'safe',
-    risk: 'safe',
-    paths: [
-      joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cache'),
-      joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Code Cache'),
-      joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'GPUCache'),
-      joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'ShaderCache'),
-      joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'GrShaderCache'),
-      joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Service Worker', 'CacheStorage'),
-    ],
-    note: '只清理网页缓存，不影响收藏夹、密码和登录状态。建议先关闭 Edge。',
-  });
-  add({
-    id: 'npm-cache',
-    label: 'npm 缓存',
-    group: 'safe',
-    risk: 'safe',
-    paths: [joinPath(LOCAL, 'npm-cache'), joinPath(ROAMING, 'npm-cache')],
-    note: 'npm 包缓存，删除后首次安装依赖会重新下载。',
-  });
-  add({
-    id: 'pip-cache',
-    label: 'pip 缓存',
-    group: 'safe',
-    risk: 'safe',
-    paths: [joinPath(LOCAL, 'pip', 'cache')],
-    note: 'Python 包缓存，可安全删除；后续安装会重新下载。',
-  });
-  add({
-    id: 'win-update',
-    label: 'Windows 更新下载缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath('C:\\Windows', 'SoftwareDistribution', 'Download')],
-    note: '已下载的更新安装包。删除不会影响系统，但更新可能需要重新下载。建议优先使用系统“磁盘清理”。',
-  });
-  add({
-    id: 'prefetch',
-    label: 'Windows 预读取缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath('C:\\Windows', 'Prefetch')],
-    note: '删除后部分程序首次启动会略慢，系统会自动重建。通常体积不大。',
-  });
-  add({
-    id: 'gradle',
-    label: 'Gradle 缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath(HOME, '.gradle', 'caches')],
-    note: 'Android / Java 构建缓存。删除后下次构建会重新下载依赖，耗时较长。',
-  });
-  add({
-    id: 'm2',
-    label: 'Maven 本地仓库',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath(HOME, '.m2', 'repository')],
-    note: 'Java 依赖仓库。删除后项目构建需要重新下载，建议仅在空间紧张时清理。',
-  });
-  add({
-    id: 'nuget',
-    label: 'NuGet 包缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath(HOME, '.nuget', 'packages')],
-    note: '.NET 依赖缓存，删除后还原项目时会重新下载。',
-  });
-  add({
-    id: 'pnpm',
-    label: 'pnpm 全局缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath(LOCAL, 'pnpm', 'store')],
-    note: 'pnpm 内容寻址存储，删除后所有项目下次安装都会重新下载。',
-  });
-  add({
-    id: 'yarn',
-    label: 'Yarn 缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath(LOCAL, 'Yarn', 'Cache'), joinPath(LOCAL, 'Yarn', 'Berry', 'cache')],
-    note: 'Yarn 包缓存，删除后安装依赖会重新下载。',
-  });
-  add({
-    id: 'dotcache',
-    label: '.cache 缓存',
-    group: 'caution',
-    risk: 'caution',
-    paths: [joinPath(HOME, '.cache')],
-    note: '各类开发工具的通用缓存目录，通常可重建；删除前请确认其中没有你要保留的工具数据。',
-  });
-  add({
-    id: 'old-windows',
-    label: '旧版 Windows 安装 (Windows.old)',
-    group: 'system',
-    risk: 'caution',
-    paths: [joinPath('C:\\', 'Windows.old')],
-    note: '升级前的旧系统文件。不要直接删除，建议用“磁盘清理 → 清理系统文件 → 以前的 Windows 安装”删除。',
-    noDelete: true,
-    action: 'openDiskCleanup',
-  });
+  if (st.letter === SYSTEM_DRIVE) {
+    add({
+      id: 'user-temp',
+      label: '用户临时文件',
+      group: 'safe',
+      risk: 'safe',
+      paths: [joinPath(LOCAL, 'Temp')],
+      note: '各类程序产生的临时文件。正在使用的文件可能跳过，建议关闭浏览器和大型软件后清理。',
+    });
+    add({
+      id: 'win-temp',
+      label: 'Windows 临时文件',
+      group: 'safe',
+      risk: 'safe',
+      paths: [joinPath(root, 'Windows', 'Temp')],
+      note: '系统临时文件，可安全删除；被占用的文件会自动跳过。',
+    });
+    add({
+      id: 'crash-dumps',
+      label: '崩溃转储',
+      group: 'safe',
+      risk: 'safe',
+      paths: [joinPath(LOCAL, 'CrashDumps'), joinPath(LOCAL, 'Microsoft', 'Windows', 'WER')],
+      note: '程序崩溃时生成的转储文件，通常可以安全清理。',
+    });
+    add({
+      id: 'chrome-cache',
+      label: 'Chrome 浏览器缓存',
+      group: 'safe',
+      risk: 'safe',
+      paths: [
+        joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Cache'),
+        joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Code Cache'),
+        joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'GPUCache'),
+        joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'ShaderCache'),
+        joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'GrShaderCache'),
+        joinPath(LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Service Worker', 'CacheStorage'),
+      ],
+      note: '只清理网页缓存，不会删除书签、密码和登录状态。建议先关闭 Chrome。',
+    });
+    add({
+      id: 'edge-cache',
+      label: 'Edge 浏览器缓存',
+      group: 'safe',
+      risk: 'safe',
+      paths: [
+        joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cache'),
+        joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Code Cache'),
+        joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'GPUCache'),
+        joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'ShaderCache'),
+        joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'GrShaderCache'),
+        joinPath(LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Service Worker', 'CacheStorage'),
+      ],
+      note: '只清理网页缓存，不影响收藏夹、密码和登录状态。建议先关闭 Edge。',
+    });
+    add({
+      id: 'npm-cache',
+      label: 'npm 缓存',
+      group: 'safe',
+      risk: 'safe',
+      paths: [joinPath(LOCAL, 'npm-cache'), joinPath(ROAMING, 'npm-cache')],
+      note: 'npm 包缓存，删除后首次安装依赖会重新下载。',
+    });
+    add({
+      id: 'pip-cache',
+      label: 'pip 缓存',
+      group: 'safe',
+      risk: 'safe',
+      paths: [joinPath(LOCAL, 'pip', 'cache')],
+      note: 'Python 包缓存，可安全删除；后续安装会重新下载。',
+    });
+    add({
+      id: 'win-update',
+      label: 'Windows 更新下载缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(root, 'Windows', 'SoftwareDistribution', 'Download')],
+      note: '已下载的更新安装包。删除不会影响系统，但更新可能需要重新下载。建议优先使用系统“磁盘清理”。',
+    });
+    add({
+      id: 'prefetch',
+      label: 'Windows 预读取缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(root, 'Windows', 'Prefetch')],
+      note: '删除后部分程序首次启动会略慢，系统会自动重建。通常体积不大。',
+    });
+    add({
+      id: 'gradle',
+      label: 'Gradle 缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(HOME, '.gradle', 'caches')],
+      note: 'Android / Java 构建缓存。删除后下次构建会重新下载依赖，耗时较长。',
+    });
+    add({
+      id: 'm2',
+      label: 'Maven 本地仓库',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(HOME, '.m2', 'repository')],
+      note: 'Java 依赖仓库。删除后项目构建需要重新下载，建议仅在空间紧张时清理。',
+    });
+    add({
+      id: 'nuget',
+      label: 'NuGet 包缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(HOME, '.nuget', 'packages')],
+      note: '.NET 依赖缓存，删除后还原项目时会重新下载。',
+    });
+    add({
+      id: 'pnpm',
+      label: 'pnpm 全局缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(LOCAL, 'pnpm', 'store')],
+      note: 'pnpm 内容寻址存储，删除后所有项目下次安装都会重新下载。',
+    });
+    add({
+      id: 'yarn',
+      label: 'Yarn 缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(LOCAL, 'Yarn', 'Cache'), joinPath(LOCAL, 'Yarn', 'Berry', 'cache')],
+      note: 'Yarn 包缓存，删除后安装依赖会重新下载。',
+    });
+    add({
+      id: 'dotcache',
+      label: '.cache 缓存',
+      group: 'caution',
+      risk: 'caution',
+      paths: [joinPath(HOME, '.cache')],
+      note: '各类开发工具的通用缓存目录，通常可重建；删除前请确认其中没有你要保留的工具数据。',
+    });
+    add({
+      id: 'old-windows',
+      label: '旧版 Windows 安装 (Windows.old)',
+      group: 'system',
+      risk: 'caution',
+      paths: [joinPath(root, 'Windows.old')],
+      note: '升级前的旧系统文件。不要直接删除，建议用“磁盘清理 → 清理系统文件 → 以前的 Windows 安装”删除。',
+      noDelete: true,
+      action: 'openDiskCleanup',
+    });
 
-  // 应用数据大户（不默认推荐，只提示）
-  const appDataBases = [LOCAL, ROAMING];
-  const appCandidates = [];
-  for (const base of appDataBases) {
-    const rec = cachedRec(base);
-    if (!rec || !rec.c) continue;
-    for (const [name, size] of rec.c) {
-      if (size < 800 * 1024 * 1024) continue;
-      const full = path.win32.join(base, name);
-      if (checkDeletable(full)) continue;
-      if (/temp|cache|crash|wer|packages|microsoft|google|programs|pip|npm|yarn|pnpm|m2|gradle|nuget/i.test(name)) continue;
-      appCandidates.push({
-        id: 'app-' + full.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        label: name + '（应用数据）',
-        group: 'apps',
-        risk: 'caution',
-        paths: [full],
-        note: '应用自身的数据目录，可能包含登录状态、配置或本地项目。删除前请确认应用已关闭，并了解可能丢失数据。',
-      });
+    const appDataBases = [LOCAL, ROAMING];
+    const appCandidates = [];
+    for (const base of appDataBases) {
+      const rec = cachedRec(st, base);
+      if (!rec || !rec.c) continue;
+      for (const [name, size] of rec.c) {
+        if (size < 800 * 1024 * 1024) continue;
+        const full = path.win32.join(base, name);
+        if (checkDeletable(full)) continue;
+        if (/temp|cache|crash|wer|packages|microsoft|google|programs|pip|npm|yarn|pnpm|m2|gradle|nuget/i.test(name)) continue;
+        appCandidates.push({
+          id: 'app-' + full.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          label: name + '（应用数据）',
+          group: 'apps',
+          risk: 'caution',
+          paths: [full],
+          note: '应用自身的数据目录，可能包含登录状态、配置或本地项目。删除前请确认应用已关闭，并了解可能丢失数据。',
+        });
+      }
     }
+    appCandidates.sort((a, b) => {
+      const sa = (cachedRec(st, a.paths[0]) || {}).s || 0;
+      const sb = (cachedRec(st, b.paths[0]) || {}).s || 0;
+      return sb - sa;
+    });
+    raw.push(...appCandidates.slice(0, 5));
   }
-  appCandidates.sort((a, b) => {
-    const sa = (cachedRec(a.paths[0]) || {}).s || 0;
-    const sb = (cachedRec(b.paths[0]) || {}).s || 0;
-    return sb - sa;
-  });
-  raw.push(...appCandidates.slice(0, 5));
 
   const items = [];
   for (const def of raw) {
-    const { size, partial, existing } = await sizeForSuggestion(def.paths);
+    const { size, partial, existing } = await sizeForSuggestion(st, def.paths);
     if (!existing) continue;
     if (size < 1 * 1024 * 1024 && def.group !== 'system') continue;
     items.push({
@@ -910,53 +996,57 @@ async function buildSuggestions() {
   }
   items.sort((a, b) => b.size - a.size);
 
-  // 大目录快捷入口
   const bigDirs = [];
-  for (const base of [LOCAL, ROAMING, 'C:\\Users\\' + path.win32.basename(HOME)]) {
-    const rec = cachedRec(base);
+  const bases =
+    st.letter === SYSTEM_DRIVE
+      ? [LOCAL, ROAMING, joinPath(root, 'Users', path.win32.basename(HOME))]
+      : [root];
+  for (const base of bases) {
+    const rec = cachedRec(st, base);
     if (!rec || !rec.c) continue;
-    for (const [name, size] of rec.c.slice(0, 8)) {
+    for (const [name, size] of rec.c.slice(0, 12)) {
       if (size < 500 * 1024 * 1024) continue;
       const full = path.win32.join(base, name);
-      bigDirs.push({ name, path: full, size });
+      bigDirs.push({ name, path: full, size, protected: !!checkDeletable(full) });
     }
   }
   bigDirs.sort((a, b) => b.size - a.size);
 
-  // 系统信息项
   const sys = [];
-  const hiber = joinPath('C:\\', 'hiberfil.sys');
-  const pagefile = joinPath('C:\\', 'pagefile.sys');
-  const locked = await getRootLockedFiles();
-  const lockedMap = new Map(locked.map((f) => [f.name.toLowerCase(), Number(f.size)]));
-  const winSxS = joinPath('C:\\Windows', 'WinSxS');
-  for (const [id, name, p, size, note] of [
-    [
-      'hiber',
-      '休眠文件 hiberfil.sys',
-      hiber,
-      lockedMap.get('hiberfil.sys') || 0,
-      '如不使用休眠，可在管理员终端执行 powercfg /h off 关闭并释放空间。',
-    ],
-    [
-      'pagefile',
-      '虚拟内存 pagefile.sys / swapfile.sys',
-      pagefile,
-      (lockedMap.get('pagefile.sys') || 0) + (lockedMap.get('swapfile.sys') || 0),
-      '系统托管的分页文件，不建议直接删除；可在系统属性中调整大小。',
-    ],
-    [
-      'winsxs',
-      'WinSxS 组件存储',
-      winSxS,
-      (cachedRec(winSxS) || {}).s || 0,
-      '不要直接删除。可在管理员终端执行 DISM /Online /Cleanup-Image /StartComponentCleanup 清理旧组件。',
-    ],
-  ]) {
-    if (size > 0) sys.push({ id, label: name, path: p, size, note });
+  if (st.letter === SYSTEM_DRIVE) {
+    const hiber = joinPath(root, 'hiberfil.sys');
+    const pagefile = joinPath(root, 'pagefile.sys');
+    const locked = await getRootLockedFiles(st);
+    const lockedMap = new Map(locked.map((f) => [f.name.toLowerCase(), Number(f.size)]));
+    const winSxS = joinPath(root, 'Windows', 'WinSxS');
+    for (const [id, name, p, size, note] of [
+      [
+        'hiber',
+        '休眠文件 hiberfil.sys',
+        hiber,
+        lockedMap.get('hiberfil.sys') || 0,
+        '如不使用休眠，可在管理员终端执行 powercfg /h off 关闭并释放空间。',
+      ],
+      [
+        'pagefile',
+        '虚拟内存 pagefile.sys / swapfile.sys',
+        pagefile,
+        (lockedMap.get('pagefile.sys') || 0) + (lockedMap.get('swapfile.sys') || 0),
+        '系统托管的分页文件，不建议直接删除；可在系统属性中调整大小。',
+      ],
+      [
+        'winsxs',
+        'WinSxS 组件存储',
+        winSxS,
+        (cachedRec(st, winSxS) || {}).s || 0,
+        '不要直接删除。可在管理员终端执行 DISM /Online /Cleanup-Image /StartComponentCleanup 清理旧组件。',
+      ],
+    ]) {
+      if (size > 0) sys.push({ id, label: name, path: p, size, note });
+    }
   }
 
-  return { items, bigDirs: bigDirs.slice(0, 12), system: sys };
+  return { items, bigDirs: bigDirs.slice(0, 12), system: sys, drive: st.letter };
 }
 
 // ---------- HTTP ----------
@@ -1019,49 +1109,63 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-let scanProcess = null;
-
-function startScan() {
-  const prog = readProgress();
-  if (scanProcess && !scanProcess.killed) return { started: false, reason: '正在扫描' };
-  if (prog && prog.phase === 'scanning' && prog.ageMs < 8000) return { started: false, reason: '正在扫描' };
-  live = null;
-  liveMap = new Map();
-  liveMtime = 0;
-  progressCache = { at: 0, value: null };
+function startScan(letter = SYSTEM_DRIVE) {
+  const st = stateFor(letter);
+  const prog = readProgress(st);
+  if (st.process && !st.process.killed) return { started: false, reason: '正在扫描', drive: st.letter };
+  if (prog && prog.phase === 'scanning' && prog.ageMs < 8000) return { started: false, reason: '正在扫描', drive: st.letter };
+  st.live = null;
+  st.liveMap = new Map();
+  st.liveMtime = 0;
+  st.progressCache = { at: 0, value: null };
+  st.driveCache = { at: 0, value: null };
   try {
-    fs.rmSync(LIVE_FILE, { force: true });
+    fs.rmSync(st.files.live, { force: true });
+    fs.rmSync(st.files.liveTmp, { force: true });
   } catch (_) {}
-  scanProcess = spawn(process.execPath, [path.join(APP_DIR, 'scan.js')], {
+  st.process = spawn(process.execPath, [path.join(APP_DIR, 'scan.js')], {
     cwd: APP_DIR,
     detached: false,
     windowsHide: true,
     stdio: 'ignore',
+    env: { ...process.env, CDRIVE_ROOT: st.root },
   });
-  scanProcess.on('exit', () => {
-    scanProcess = null;
+  st.process.on('exit', () => {
+    st.process = null;
   });
-  return { started: true };
+  return { started: true, drive: st.letter };
+}
+
+function driveFromParam(value, fallback = SYSTEM_DRIVE) {
+  const letter = String(value || fallback).trim().toUpperCase();
+  return /^[A-Z]$/.test(letter) ? letter : fallback;
 }
 
 async function handleApi(req, res, urlObj) {
   const route = urlObj.pathname;
 
+  if (route === '/api/drives') {
+    const drives = await listDrives(true);
+    json(res, 200, { drives, systemDrive: SYSTEM_DRIVE, current: driveFromParam(urlObj.searchParams.get('drive')) });
+    return;
+  }
+
   if (route === '/api/overview') {
-    if (scan && fs.existsSync(SCAN_FILE)) {
+    const st = stateFor(driveFromParam(urlObj.searchParams.get('drive')));
+    if (st.scan && fs.existsSync(st.files.scan)) {
       try {
-        const st = fs.statSync(SCAN_FILE);
-        if (st.mtimeMs !== scanMtime) loadScan(true);
+        const fileStat = fs.statSync(st.files.scan);
+        if (fileStat.mtimeMs !== st.scanMtime) loadScan(st, true);
       } catch (_) {}
     } else {
-      loadScan(true);
+      loadScan(st, true);
     }
-    const drive = await getDriveInfo();
-    const progress = readProgress();
-    const scanning = isScanning(progress);
-    if (scanning) loadLive();
+    const drive = await getDriveInfo(st);
+    const progress = readProgress(st);
+    const scanning = isScanning(st, progress);
+    if (scanning) loadLive(st);
     let root = null;
-    const rootRec = cachedRec('C:\\');
+    const rootRec = cachedRec(st, st.root);
     if (rootRec) {
       root = {
         path: rootRec.p,
@@ -1073,29 +1177,30 @@ async function handleApi(req, res, urlObj) {
             name,
             path: childPath,
             size,
-            cached: !!cachedRec(childPath),
+            cached: !!cachedRec(st, childPath),
           };
         }),
         otherSize: rootRec.o || 0,
       };
     }
     const liveStats =
-      scanning && live
+      scanning && st.live
         ? {
-            dirs: (live.stats && live.stats.dirs) || 0,
-            files: (live.stats && live.stats.files) || 0,
-            bytes: (rootRec && rootRec.s) || (live.stats && live.stats.bytes) || 0,
+            dirs: (st.live.stats && st.live.stats.dirs) || 0,
+            files: (st.live.stats && st.live.stats.files) || 0,
+            bytes: (rootRec && rootRec.s) || (st.live.stats && st.live.stats.bytes) || 0,
           }
         : null;
     json(res, 200, {
       drive,
+      driveLetter: st.letter,
       scan:
-        scan || liveStats
+        st.scan || liveStats
           ? {
-              scannedAt: (live && scanning ? live.generatedAt : scan && scan.scannedAt) || null,
-              elapsedMs: (live && scanning ? live.elapsedMs : scan && scan.elapsedMs) || null,
-              stats: liveStats || (scan && scan.stats),
-              modifiedAt: scan ? scan.modifiedAt || null : null,
+              scannedAt: (st.live && scanning ? st.live.generatedAt : st.scan && st.scan.scannedAt) || null,
+              elapsedMs: (st.live && scanning ? st.live.elapsedMs : st.scan && st.scan.elapsedMs) || null,
+              stats: liveStats || (st.scan && st.scan.stats),
+              modifiedAt: st.scan ? st.scan.modifiedAt || null : null,
               live: !!liveStats,
             }
           : null,
@@ -1107,41 +1212,41 @@ async function handleApi(req, res, urlObj) {
   }
 
   if (route === '/api/status') {
-    const progress = readProgress();
-    const scanning = isScanning(progress);
-    if (scanning) loadLive();
+    const st = stateFor(driveFromParam(urlObj.searchParams.get('drive')));
+    const progress = readProgress(st);
+    const scanning = isScanning(st, progress);
+    if (scanning) loadLive(st);
     json(res, 200, {
+      drive: st.letter,
       progress,
-      scanMtime,
-      liveMtime: scanning ? liveMtime : 0,
-      liveBytes: scanning && live ? Number((live.stats && live.stats.bytes) || 0) : 0,
+      scanMtime: st.scanMtime,
+      liveMtime: scanning ? st.liveMtime : 0,
+      liveBytes: scanning && st.live ? Number((st.live.stats && st.live.stats.bytes) || 0) : 0,
     });
     return;
   }
 
   if (route === '/api/list') {
-    const p = normPath(urlObj.searchParams.get('path') || 'C:\\');
+    const requestedDrive = driveFromParam(urlObj.searchParams.get('drive'));
+    const p = normPath(urlObj.searchParams.get('path') || driveRoot(requestedDrive));
     if (!p) {
       json(res, 400, { error: '无效路径' });
       return;
     }
-    if (!/^c:/i.test(p)) {
-      json(res, 400, { error: '仅支持 C 盘' });
-      return;
-    }
+    const st = stateFor(driveOf(p));
     try {
-      const progress = readProgress();
-      const scanning = isScanning(progress);
-      if (scanning) loadLive();
+      const progress = readProgress(st);
+      const scanning = isScanning(st, progress);
+      if (scanning) loadLive(st);
       const liveMode = urlObj.searchParams.get('live') === '1' && scanning;
-      const data = await listDirectory(p, { live: liveMode });
-      if (keyOf(p) === 'c:\\') {
-        const [drive, locked] = await Promise.all([getDriveInfo(), getRootLockedFiles()]);
+      const data = await listDirectory(st, p, { live: liveMode });
+      if (keyOf(p) === st.root.toLowerCase()) {
+        const [drive, locked] = await Promise.all([getDriveInfo(st), getRootLockedFiles(st)]);
         if (drive && drive.used > data.size) {
           const lockedTotal = locked.reduce((s, f) => s + Number(f.size || 0), 0);
           const lockedItems = locked.map((f) => ({
             name: f.name,
-            path: path.win32.join('C:\\', f.name),
+            path: path.win32.join(st.root, f.name),
             size: Number(f.size),
             protected: true,
             kind: 'system',
@@ -1154,13 +1259,15 @@ async function handleApi(req, res, urlObj) {
           data.systemItems = lockedItems;
           if (remainder > 0) {
             data.systemItems.push({
-              name: '系统还原 / 回收站 / 受保护区域',
+              name: st.letter === SYSTEM_DRIVE ? '系统还原 / 回收站 / 受保护区域' : '回收站 / 系统保留区域',
               path: null,
               size: remainder,
               protected: true,
               kind: 'system',
               note:
-                '这部分空间来自系统还原点、回收站、System Volume Information、无法访问的受保护目录等。可在“磁盘清理”中清理系统文件，或以管理员身份管理还原点。',
+                st.letter === SYSTEM_DRIVE
+                  ? '这部分空间来自系统还原点、回收站、System Volume Information、无法访问的受保护目录等。可在“磁盘清理”中清理系统文件，或以管理员身份管理还原点。'
+                  : '这部分空间来自回收站、卷影副本、系统保留目录或无权限访问的内容。可清空该盘回收站，或在资源管理器中检查权限。',
             });
           }
           data.size = drive.used;
@@ -1178,16 +1285,17 @@ async function handleApi(req, res, urlObj) {
   }
 
   if (route === '/api/search') {
+    const st = stateFor(driveFromParam(urlObj.searchParams.get('drive')));
     const q = String(urlObj.searchParams.get('q') || '').trim().toLowerCase();
     if (q.length < 2) {
       json(res, 200, { results: [] });
       return;
     }
-    const progress = readProgress();
-    const scanning = isScanning(progress);
-    if (scanning) loadLive();
-    if (!scanning && !scan) loadScan(true);
-    const source = scanning && liveMap.size ? Array.from(liveMap.values()) : scan ? Array.from(dirsMap.values()) : [];
+    const progress = readProgress(st);
+    const scanning = isScanning(st, progress);
+    if (scanning) loadLive(st);
+    if (!scanning && !st.scan) loadScan(st, true);
+    const source = scanning && st.liveMap.size ? Array.from(st.liveMap.values()) : st.scan ? Array.from(st.dirsMap.values()) : [];
     const results = [];
     for (const rec of source) {
       if (!rec || !rec.p) continue;
@@ -1196,14 +1304,15 @@ async function handleApi(req, res, urlObj) {
       }
     }
     results.sort((a, b) => b.size - a.size);
-    json(res, 200, { results: results.slice(0, 60), live: scanning });
+    json(res, 200, { results: results.slice(0, 60), live: scanning, drive: st.letter });
     return;
   }
 
   if (route === '/api/suggestions') {
-    if (!scan) loadScan(true);
+    const st = stateFor(driveFromParam(urlObj.searchParams.get('drive')));
+    if (!st.scan) loadScan(st, true);
     try {
-      const data = await buildSuggestions();
+      const data = await buildSuggestions(st);
       json(res, 200, data);
     } catch (e) {
       json(res, 500, { error: e.message });
@@ -1236,7 +1345,13 @@ async function handleApi(req, res, urlObj) {
   if (route === '/api/scan') {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     if (!checkCsrf(req)) return json(res, 403, { error: '校验失败，请刷新页面' });
-    json(res, 200, startScan());
+    const body = await readBody(req);
+    const letter = driveFromParam(body.drive);
+    const drives = await listDrives();
+    if (!drives.some((d) => d.letter === letter)) {
+      return json(res, 400, { error: '找不到该磁盘分区' });
+    }
+    json(res, 200, startScan(letter));
     return;
   }
 
@@ -1244,12 +1359,14 @@ async function handleApi(req, res, urlObj) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     if (!checkCsrf(req)) return json(res, 403, { error: '校验失败，请刷新页面' });
     if (!IS_WIN) return json(res, 400, { error: '仅支持 Windows' });
-    if (isScanning()) {
-      return json(res, 409, { error: '扫描进行中，请等待扫描完成后再删除', scanning: true });
-    }
     const body = await readBody(req);
     if (!Array.isArray(body.paths) || !body.paths.length) {
       return json(res, 400, { error: '未选择任何项目' });
+    }
+    const first = normPath(body.paths[0]);
+    const st = stateFor(driveOf(first || SYSTEM_DRIVE));
+    if (isScanning(st)) {
+      return json(res, 409, { error: '扫描进行中，请等待扫描完成后再删除', scanning: true });
     }
     if (body.paths.length > 200) return json(res, 400, { error: '一次最多处理 200 项' });
     const { paths, errors: preErrors } = dedupePaths(body.paths);
@@ -1271,8 +1388,8 @@ async function handleApi(req, res, urlObj) {
       before.push({
         path: item.path,
         isDir: !!item.isDir,
-        size: await getRemovalSize(item.path),
-        existedAtScan: wasCachedAtScan(item.path, !!item.isDir),
+        size: await getRemovalSize(st, item.path),
+        existedAtScan: wasCachedAtScan(st, item.path, !!item.isDir),
       });
     }
 
@@ -1287,10 +1404,10 @@ async function handleApi(req, res, urlObj) {
     for (const r of outcomes) {
       if (!r.ok) continue;
       const b = before.find((x) => keyOf(x.path) === keyOf(r.path));
-      if (b) applyRemoval(b.path, b.size, b.isDir, b.existedAtScan);
+      if (b) applyRemoval(st, b.path, b.size, b.isDir, b.existedAtScan);
       try {
-        const st = fs.existsSync(b.path) ? fs.statSync(b.path) : null;
-        if (st && st.isDirectory()) {
+        const stat = fs.existsSync(b.path) ? fs.statSync(b.path) : null;
+        if (stat && stat.isDirectory()) {
           for (const k of Array.from(liveSizeCache.keys())) {
             if (k === keyOf(b.path) || k.startsWith(keyOf(b.path) + '\\')) liveSizeCache.delete(k);
           }
@@ -1299,13 +1416,15 @@ async function handleApi(req, res, urlObj) {
       } catch (_) {}
     }
     // 让容量统计尽快刷新
-    driveCache = { at: 0, value: null };
+    st.driveCache = { at: 0, value: null };
+    driveListCache = { at: 0, value: null };
     const okCount = outcomes.filter((r) => r.ok).length;
     const failCount = outcomes.filter((r) => !r.ok).length + results.length;
     json(res, 200, {
       results: [...results, ...outcomes],
       okCount,
       failCount,
+      drive: st.letter,
       recycledBytes: route === '/api/recycle' ? before.filter((b) => outcomes.some((o) => o.ok && keyOf(o.path) === keyOf(b.path))).reduce((s, b) => s + b.size, 0) : 0,
       freedBytes: route === '/api/delete' ? before.filter((b) => outcomes.some((o) => o.ok && keyOf(o.path) === keyOf(b.path))).reduce((s, b) => s + b.size, 0) : 0,
     });
@@ -1406,9 +1525,11 @@ function openBrowser() {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`C drive cleaner running at http://127.0.0.1:${PORT}`);
-  if (!fs.existsSync(SCAN_FILE)) {
-    startScan();
+  console.log(`Drive cleaner running at http://127.0.0.1:${PORT}`);
+  const systemState = stateFor(SYSTEM_DRIVE);
+  loadScan(systemState, true);
+  if (!fs.existsSync(systemState.files.scan)) {
+    startScan(SYSTEM_DRIVE);
   }
   setTimeout(openBrowser, 400);
 });

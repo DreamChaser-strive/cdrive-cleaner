@@ -13,6 +13,8 @@
       .replace(/'/g, '&#39;');
 
   const state = {
+    drive: 'C',
+    drives: [],
     path: 'C:\\',
     data: null,
     overview: null,
@@ -94,18 +96,47 @@
     return Number(n || 0).toLocaleString('zh-CN');
   }
 
+  function driveOf(p) {
+    return String(p || state.drive || 'C').charAt(0).toUpperCase();
+  }
+
+  function driveRoot(letter) {
+    return String(letter || state.drive || 'C').toUpperCase() + ':\\';
+  }
+
+  function driveInfo(letter) {
+    return (state.drives || []).find((d) => d.letter === String(letter || state.drive).toUpperCase()) || null;
+  }
+
+  function driveLabel(letter) {
+    const d = driveInfo(letter);
+    const L = String(letter || state.drive).toUpperCase();
+    if (d && d.label) return d.label + ' (' + L + ':)';
+    if (d && d.system) return 'Windows (' + L + ':)';
+    return L + ' 盘';
+  }
+
+  function rootKey() {
+    return keyFor(driveRoot(state.drive));
+  }
+
+  function isDriveRoot(p) {
+    return /^[a-zA-Z]:\\?$/.test(String(p || ''));
+  }
+
   function basename(p) {
     if (!p) return '';
-    if (/^[a-zA-Z]:\\?$/.test(p)) return 'Windows (C:)';
+    if (isDriveRoot(p)) return driveLabel(driveOf(p));
     const parts = p.split('\\').filter(Boolean);
     return parts[parts.length - 1] || p;
   }
 
   function parentPath(p) {
-    if (!p || /^[a-zA-Z]:\\?$/.test(p)) return 'C:\\';
+    const root = driveRoot(driveOf(p));
+    if (!p || isDriveRoot(p)) return root;
     const n = p.replace(/\\+$/, '');
     const i = n.lastIndexOf('\\');
-    if (i <= 2) return 'C:\\';
+    if (i <= 2) return root;
     return n.slice(0, i);
   }
 
@@ -165,9 +196,17 @@
     return c.l >= 55 ? 'rgba(43,33,23,.92)' : 'rgba(255,248,238,.95)';
   }
 
+  function withDrive(url) {
+    if (url.startsWith('/api/drives')) return url;
+    if (/[?&]drive=/.test(url)) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'drive=' + encodeURIComponent(state.drive);
+  }
+
   function api(url, opts = {}) {
+    url = withDrive(url);
     const headers = Object.assign({ 'X-Cleaner-Token': TOKEN }, opts.headers || {});
     if (opts.body && typeof opts.body !== 'string') {
+      opts.body = Object.assign({ drive: state.drive }, opts.body);
       opts.body = JSON.stringify(opts.body);
       headers['Content-Type'] = 'application/json';
     }
@@ -211,10 +250,77 @@
   }
 
   // ---------- 数据加载 ----------
+  async function loadDrives() {
+    try {
+      const r = await api('/api/drives');
+      state.drives = r.drives || [];
+      if (!state.drives.some((d) => d.letter === state.drive)) {
+        state.drive = (state.drives.find((d) => d.system) || state.drives[0] || { letter: 'C' }).letter;
+      }
+      renderDrivePicker();
+      return true;
+    } catch (e) {
+      toast('无法读取磁盘列表', e.message, 'error');
+      return false;
+    }
+  }
+
+  async function switchDrive(letter) {
+    const next = String(letter || 'C').toUpperCase();
+    if (next === state.drive) return;
+    state.drive = next;
+    state.path = driveRoot(next);
+    state.data = null;
+    state.overview = null;
+    state.currentItems = [];
+    state.itemsByKey = new Map();
+    state.selected = null;
+    state.checked.clear();
+    state.hovered = null;
+    state.liveVersion = 0;
+    state.pendingScanReload = false;
+    state.wasScanning = false;
+    renderDrivePicker();
+    renderBreadcrumbs();
+    renderCanvasTitle();
+    renderInspector();
+    renderList();
+    updateTray();
+    history.replaceState({ path: state.path }, '', '#' + encodeURIComponent(state.path));
+    showCanvasLoading(true);
+    await loadOverview();
+    if (state.data) {
+      showCanvasLoading(false);
+    }
+    schedulePoll(500);
+  }
+
+  function renderDrivePicker() {
+    const select = $('#driveSelect');
+    if (!select) return;
+    select.innerHTML = (state.drives || [])
+      .map(
+        (d) =>
+          '<option value="' +
+          escapeHtml(d.letter) +
+          '"' +
+          (d.letter === state.drive ? ' selected' : '') +
+          '>' +
+          escapeHtml(d.letter + ': ' + (d.label || (d.system ? '系统盘' : d.removable ? '可移动盘' : '本地磁盘')) + ' · ' + fmtBytes(d.free) + ' 可用') +
+          '</option>'
+      )
+      .join('');
+    select.value = state.drive;
+    const searchInput = $('#searchInput');
+    if (searchInput) searchInput.placeholder = '搜索整个 ' + state.drive + ' 盘，例如 .cache、node_modules';
+  }
+
   async function loadOverview() {
     try {
       const o = await api('/api/overview');
       state.overview = o;
+      if (o.driveLetter) state.drive = o.driveLetter;
+      renderDrivePicker();
       renderCapacity(o);
       renderScanUI(o.progress);
       renderStatus();
@@ -223,7 +329,8 @@
         schedulePoll();
       }
       if (!state.data && !(o.progress && o.progress.phase === 'scanning' && !o.scan)) {
-        const initial = pathFromHash() || 'C:\\';
+        let initial = pathFromHash();
+        if (!initial || driveOf(initial) !== state.drive) initial = driveRoot(state.drive);
         await loadPath(initial, { push: false });
         history.replaceState({ path: state.path }, '', '#' + encodeURIComponent(state.path));
       }
@@ -243,7 +350,12 @@
   }
 
   async function loadPath(p, opts = {}) {
-    if (!p) p = 'C:\\';
+    if (!p) p = driveRoot(state.drive);
+    const requestedDrive = driveOf(p);
+    if (requestedDrive !== state.drive) {
+      state.drive = requestedDrive;
+      renderDrivePicker();
+    }
     state.loading = true;
     showCanvasLoading(true);
     try {
@@ -269,13 +381,13 @@
         history.pushState({ path: state.path }, '', '#' + encodeURIComponent(state.path));
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
-      document.title = basename(state.path) + ' · C 盘空间清理';
+      document.title = basename(state.path) + ' · 磁盘空间清理';
     } catch (e) {
       hideCanvasEmpty();
       showCanvasEmpty('error', e.message);
       toast('无法打开目录', e.message, 'error');
       if (e.status === 404 || e.status === 403) {
-        if (keyFor(state.path) !== 'c:\\') {
+        if (keyFor(state.path) !== rootKey()) {
           setTimeout(() => loadPath(parentPath(state.path), { push: true }), 500);
         }
       }
@@ -379,6 +491,8 @@
   // ---------- 容量与状态 ----------
   function renderCapacity(o) {
     const d = o.drive;
+    const title = $('#capTitle');
+    if (title) title.innerHTML = '<svg><use href="#i-drive"/></svg> ' + escapeHtml(driveLabel(o.driveLetter || state.drive));
     if (!d || !d.total) {
       $('#capStats').textContent = '无法读取磁盘容量';
       return;
@@ -418,7 +532,7 @@
     if (state.refreshingLive) return;
     state.refreshingLive = true;
     try {
-      const target = state.path || 'C:\\';
+      const target = state.path || driveRoot(state.drive);
       const fresh = await api('/api/list?path=' + encodeURIComponent(target) + '&live=1');
       const hasLiveContent =
         (fresh.dirs || []).some((x) => Number(x.size) > 0) ||
@@ -507,7 +621,7 @@
     empty.classList.remove('hidden');
     empty.innerHTML =
       '<div class="loader"></div>' +
-      '<h3>正在扫描 C 盘…</h3>' +
+      '<h3>正在扫描 ' + escapeHtml(state.drive) + ' 盘…</h3>' +
       '<p>已发现 ' +
       fmtCount(p.scannedFiles || 0) +
       ' 个文件，累计 ' +
@@ -546,7 +660,7 @@
       return;
     }
     const d = state.data;
-    const isRoot = keyFor(state.path) === 'c:\\';
+    const isRoot = keyFor(state.path) === rootKey();
     const tag = isRoot
       ? state.data.systemItems && state.data.systemItems.length
         ? '含系统保留'
@@ -568,11 +682,12 @@
   // ---------- 面包屑 ----------
   function renderBreadcrumbs() {
     const nav = $('#breadcrumbs');
-    const p = state.path || 'C:\\';
+    const p = state.path || driveRoot(state.drive);
+    const root = driveRoot(driveOf(p));
     const segs = p.split('\\').filter(Boolean);
     const crumbs = [];
-    crumbs.push({ label: 'C:', path: 'C:\\' });
-    let acc = 'C:\\';
+    crumbs.push({ label: driveOf(p) + ':', path: root });
+    let acc = root;
     for (let i = 1; i < segs.length; i++) {
       acc = acc.replace(/\\$/, '') + '\\' + segs[i];
       crumbs.push({ label: segs[i], path: acc });
@@ -601,7 +716,7 @@
       });
     });
     const upBtn = $('#upBtn');
-    upBtn.disabled = keyFor(state.path) === 'c:\\';
+    upBtn.disabled = keyFor(state.path) === rootKey();
     nav.scrollLeft = nav.scrollWidth;
   }
 
@@ -1133,7 +1248,7 @@
     }
     const item = state.selected;
     if (!item) {
-      const isRoot = keyFor(d.path) === 'c:\\';
+      const isRoot = keyFor(d.path) === keyFor(driveRoot(driveOf(d.path)));
       head.innerHTML =
         '<div class="eyebrow"><svg><use href="#i-folder"/></svg> 当前目录</div>' +
         '<div class="sel-title"><svg><use href="#i-folder"/></svg>' +
@@ -1154,7 +1269,7 @@
         '<span><b>' +
         fmtCount(d.directFileCount) +
         '</b> 个直属文件</span>' +
-        (d.driveFree ? '<span><b>' + fmtBytes(d.driveFree) + '</b> C 盘可用</span>' : '') +
+        (d.driveFree ? '<span><b>' + fmtBytes(d.driveFree) + '</b> ' + escapeHtml(driveOf(d.path) + ' 盘可用') + '</span>' : '') +
         '</div>' +
         '<div class="sel-actions">' +
         '<button class="btn btn-accent" data-act="open-current"><svg><use href="#i-external"/></svg> 打开位置</button>' +
@@ -1396,8 +1511,8 @@
     if (valid.length > 12) list.push('<div class="delete-item"><span class="dp">还有 ' + (valid.length - 12) + ' 项…</span><span></span></div>');
     $('#deleteList').innerHTML = list.join('');
     $('#deleteNotice').innerHTML = permanent
-      ? '<svg><use href="#i-alert"/></svg><span>永久删除会立即释放 C 盘空间，但文件无法恢复。请确认已不再需要。</span>'
-      : '<svg><use href="#i-info"/></svg><span>移到回收站后，文件仍占用 C 盘空间；清空回收站后才会真正释放。工具会优先使用系统回收站，可在资源管理器中还原。</span>';
+      ? '<svg><use href="#i-alert"/></svg><span>永久删除会立即释放所选磁盘空间，但文件无法恢复。请确认已不再需要。</span>'
+      : '<svg><use href="#i-info"/></svg><span>移到回收站后，文件仍占用磁盘空间；清空回收站后才会真正释放。工具会优先使用系统回收站，可在资源管理器中还原。</span>';
     $('#permanentConfirmLine').classList.toggle('hidden', !permanent);
     $('#permanentConfirm').checked = false;
     const btn = $('#confirmDeleteBtn');
@@ -1470,6 +1585,7 @@
 
   async function refreshAfterDelete(deletedPaths) {
     try {
+      await loadDrives();
       const o = await api('/api/overview');
       state.overview = o;
       renderCapacity(o);
@@ -1482,7 +1598,7 @@
     });
     if (hit) {
       const target = keyFor(hit) === currentKey ? parentPath(state.path) : parentPath(hit);
-      await loadPath(target || 'C:\\', { push: true });
+      await loadPath(target || driveRoot(state.drive), { push: true });
     } else {
       await loadPath(state.path, { push: false });
     }
@@ -1757,7 +1873,7 @@
     el.classList.remove('hidden');
     if (kind === 'no-scan') {
       el.innerHTML =
-        '<h3>还没有扫描数据</h3><p>需要先扫描 C 盘，生成空间占用快照。扫描在本机运行，不会上传任何文件信息。</p><button class="btn btn-accent" id="startScanEmpty">开始扫描 C 盘</button>';
+        '<h3>还没有扫描数据</h3><p>需要先扫描 ' + escapeHtml(state.drive) + ' 盘，生成空间占用快照。扫描在本机运行，不会上传任何文件信息。</p><button class="btn btn-accent" id="startScanEmpty">开始扫描 ' + escapeHtml(state.drive) + ' 盘</button>';
       const b = $('#startScanEmpty');
       if (b) b.addEventListener('click', triggerRescan);
     } else if (kind === 'error') {
@@ -1813,12 +1929,13 @@
 
   async function finishScan() {
     try {
+      await loadDrives();
       const o = await api('/api/overview');
       state.overview = o;
       renderCapacity(o);
       renderScanUI(o.progress);
       renderStatus();
-      const target = state.path || 'C:\\';
+      const target = state.path || driveRoot(state.drive);
       await loadPath(target, { push: false });
       toast('扫描完成', '空间数据已更新，可以开始按大小清理。', 'success');
     } catch (e) {
@@ -1952,10 +2069,10 @@
   // ---------- 事件绑定 ----------
   $('#backBtn').addEventListener('click', () => {
     if (history.length > 1) history.back();
-    else if (keyFor(state.path) !== 'c:\\') loadPath(parentPath(state.path), { push: true });
+    else if (keyFor(state.path) !== rootKey()) loadPath(parentPath(state.path), { push: true });
   });
   $('#upBtn').addEventListener('click', () => {
-    if (keyFor(state.path) !== 'c:\\') loadPath(parentPath(state.path), { push: true });
+    if (keyFor(state.path) !== rootKey()) loadPath(parentPath(state.path), { push: true });
   });
   $('#rescanBtn').addEventListener('click', triggerRescan);
   $('#suggestBtn').addEventListener('click', openSuggestions);
@@ -2073,7 +2190,7 @@
     if (typing) return;
     if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowLeft')) {
       e.preventDefault();
-      if (keyFor(state.path) !== 'c:\\') loadPath(parentPath(state.path), { push: true });
+      if (keyFor(state.path) !== rootKey()) loadPath(parentPath(state.path), { push: true });
     }
     if (e.key === 'Delete') {
       const items = state.checked.size
@@ -2118,12 +2235,14 @@
     const ro = new ResizeObserver(() => resizeCanvas());
     ro.observe(holder);
     resizeCanvas();
+    $('#driveSelect').addEventListener('change', (e) => switchDrive(e.target.value));
+    await loadDrives();
     await loadOverview();
     if (!state.data) {
       const prog = state.overview && state.overview.progress;
       const waitingScan = !!(prog && prog.phase === 'scanning' && !(state.overview && state.overview.scan));
       if (!waitingScan) {
-        const p = pathFromHash() || 'C:\\';
+        const p = pathFromHash() || driveRoot(state.drive);
         await loadPath(p, { push: false });
       } else {
         state.wasScanning = true;
